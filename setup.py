@@ -10,5 +10,5 @@ setup(name='manatee',
         'matplotlib>=2.2.2',
         'tslearn>=0.1.21',
         'rrcf==0.1'],
-    dependency_links=['git+https://github.com/NewKnowledge/rrcf@8164d6fa9787b13b575eb1eaad8d57a775adda90#egg=rrcf-0.1'],
+    dependency_links=['git+https://github.com/NewKnowledge/rrcf@1844465f28816b55ef4ef481809dcf26f968c5c3#egg=rrcf-0.1'],
     include_package_data=True)
