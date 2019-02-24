@@ -254,7 +254,7 @@ if __name__ == '__main__':
     #plt.show()
     
     # test streaming anomaly detection
-    window_size = 1
+    window_size = 4
     anom_score = clf.stream_anomaly_scores(hashtags[ht], window_size, new_forest = True)
     # mark top 5% of predictions as anomalous
     anom_pred = anom_score > np.percentile(anom_score, anom_thresh)
