@@ -186,6 +186,8 @@ class robust_rcf():
         initial_index = self.num_points
         for index, point in enumerate(points_gen):
             index += initial_index
+            
+            ## TODO: Check whether streaming is actually creating unique trees...
             for tree in self.forest:
                 # If tree is above permitted size, drop the oldest point (FIFO)
                 if len(tree.leaves) >= self.tree_size:
