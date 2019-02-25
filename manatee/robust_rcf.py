@@ -98,6 +98,10 @@ class robust_rcf():
             avg_codisp[codisp.index] += codisp
             np.add.at(index, codisp.index.values, 1)
         avg_codisp /= index
+        # fill NAs with 0s - for points that were not sampled in any tree
+        # output message saying which points were not sampled in any tree
+        print('The following points weren\'t included in any randomly sampled trees: {}'.format(np.where(avg_codisp.isna())))
+        avg_codisp = avg_codisp.fillna(0)
         return avg_codisp
     
 
@@ -184,23 +188,24 @@ class robust_rcf():
         # calculate streaming anomaly scores
         avg_codisp = pd.Series(0.0, index=np.arange(self.num_points, self.num_points + points.shape[0]))
         initial_index = self.num_points
+        print(initial_index)
         for index, point in enumerate(points_gen):
             index += initial_index
-            
-            ## TODO: Check whether streaming is actually creating unique trees...
             for tree in self.forest:
                 # If tree is above permitted size, drop the oldest point (FIFO)
+                #print(len(tree.leaves))
+                #print(self.tree_size)
                 if len(tree.leaves) >= self.tree_size:
                     tree.forget_point(index - self.tree_size)
-                    self.num_points -= 1
                 # Insert the new point into the tree
                 try:
                     tree.insert_point(point, index=index)
                 except:
                     ValueError('failure for point {} at index {}'.format(point, index))
-                self.num_points += 1
                 # Compute codisp on the new point and take the average among all trees
                 avg_codisp[index] += tree.codisp(index)
+            self.num_points += 1
+            
         return avg_codisp // self.num_trees
 
 # main method for testing class
@@ -214,15 +219,16 @@ if __name__ == '__main__':
 
     # mark top 5% of rate values as anomalous
     anom_thresh = 95
-    #anom = hashtags[ht] > np.percentile(hashtags[ht], anom_thresh)
+    anom = hashtags[ht] > np.percentile(hashtags[ht], anom_thresh)
 
     ''' Instantiate RRCF'''
     # set HPs and instantiate
-    num_trees = 200
-    tree_size = 40
+    num_trees = 5
+    tree_size = 10
+
     clf = robust_rcf(num_trees, tree_size)
     
-    ''' Test Different Methods'''
+    '''Test Different Methods'''
     # test batch anomaly detection
     clf.fit_batch(hashtags[ht].reshape(-1,1))
     anom_score = clf.batch_anomaly_scores()
@@ -234,9 +240,8 @@ if __name__ == '__main__':
     
     # mark top 5% of predictions as anomalous
     anom_pred = anom_score > np.percentile(anom_score, anom_thresh)
-
     # print evaluation
-    # print(evaluate(anom, anom_pred)) 
+    print(evaluate(anom, anom_pred)) 
 
     # plot comparison of labeled anomalies to predicted anomalies
     colors = ('blue', 'red')
@@ -253,17 +258,18 @@ if __name__ == '__main__':
     for index, dat, color, target in zip(pred_indices, pred_data, colors, targets):
         plt.scatter(index, dat, c = color, label = target, s=10)
     plt.legend()
-    #plt.show()
-    
+    plt.show()
+
     # test streaming anomaly detection
-    window_size = 4
-    anom_score = clf.stream_anomaly_scores(hashtags[ht], window_size, new_forest = True)
+    window_size = 1
+    anom_score = clf.stream_anomaly_scores(hashtags[ht], window_size, new_forest=True)
+    print(anom_score)
     # mark top 5% of predictions as anomalous
     anom_pred = anom_score > np.percentile(anom_score, anom_thresh)
 
     # print evaluation
-    #print(evaluate(anom, anom_pred)) 
-
+    print(evaluate(anom, anom_pred)) 
+    
     # plot comparison of labeled anomalies to predicted anomalies
     pred_indices = (np.where(~anom_pred), np.where(anom_pred))
     pred_data = (hashtags[ht][~anom_pred], hashtags[ht][anom_pred])
@@ -272,9 +278,9 @@ if __name__ == '__main__':
         plt.scatter(index, dat, c = color, label = target, s=10)
     plt.legend()
     plt.show()
-
-    ## TODO: Test streaming anomaly detection from created tree
-    #print(clf.stream_anomaly_scores(hashtags[ht], window_size))
+    
+    ## Test streaming anomaly detection from created tree
+    print(clf.stream_anomaly_scores(hashtags[ht], window_size))
 
 
 
