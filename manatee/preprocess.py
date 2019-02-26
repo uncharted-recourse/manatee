@@ -207,7 +207,12 @@ def cluster_emails(datapath, min_cluster_size, min_samples = 1):
 
 # main method for testing preprocessing functions
 if __name__ == '__main__':
+    '''
     datapath = '/Users/jeffreygleason 1/Desktop/NewKnowledge/Code/ASED/data'
     all_emails = parse_all_emails(datapath)
     print(all_emails.shape)
     np.savez('all_emails_parsed.npz', all_emails = all_emails)
+    '''
+    data = 'all_emails_parsed.npz'
+    df = cluster_emails(data, min_cluster_size=60)
+    df.to_pickle('all_emails_clustered.pkl')
