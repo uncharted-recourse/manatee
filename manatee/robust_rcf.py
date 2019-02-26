@@ -193,8 +193,7 @@ class robust_rcf():
             index += initial_index
             for tree in self.forest:
                 # If tree is above permitted size, drop the oldest point (FIFO)
-                #print(len(tree.leaves))
-                #print(self.tree_size)
+                # TODO: forget oldest point or another random point with prob
                 if len(tree.leaves) >= self.tree_size:
                     tree.forget_point(index - self.tree_size)
                 # Insert the new point into the tree
