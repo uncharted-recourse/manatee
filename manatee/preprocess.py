@@ -175,6 +175,36 @@ def parse_all_emails(datapath):
     # convert parsed emails to dataframe 
     return pd.DataFrame(all_emails, columns = ['Timestamp','Year', 'Month', 'Day of Month', 'Day of Week', 'Hour', 'Minute', 'Seconds', 'Simon Features', 'file'])
 
+def cluster_emails(datapath, min_cluster_size, min_samples = 1):
+
+    # load data from saved file
+    data = np.load(datapath)['all_emails']
+    df = pd.DataFrame(data, columns = ['Timestamp','Year', 'Month', 'Day of Month', 'Day of Week', 'Hour', 'Minute', 'Seconds', 'Simon Features', 'file'])
+
+    # instantiate hdbscan clustering
+    clusterer = hdbscan.HDBSCAN(min_cluster_size= min_cluster_size, min_samples=min_samples)
+
+    # cluster enron and nigerian emails
+    clusterer.fit(pd.DataFrame((df.loc[df['file'] == 'enron.jsonl']['Simon Features']).values.tolist()))
+    nlabels = clusterer.labels_.max()
+    enron_labels = pd.DataFrame(clusterer.labels_, index = df.index[df['file'] == 'enron.jsonl'])
+    df = pd.concat([df, enron_labels], axis=1)
+    clusterer.fit(pd.DataFrame((df.loc[df['file'] == 'nigerian.jsonl']['Simon Features']).values.tolist()))
+    labels = clusterer.labels_ + nlabels + 1
+    nigerian_labels = pd.DataFrame(labels, index = df.index[df['file'] == 'nigerian.jsonl'])
+    df = pd.concat([df, nigerian_labels], axis = 1)
+    nlabels = labels.max()
+
+    # add cluster lablels for JPL abuse set
+    # TODO - could cluster these ourselves??
+    for cat in df['file'].unique():
+        if cat not in ['enron.jsonl', 'nigerian.jsonl']:
+            nlabels += 1
+            labels = pd.DataFrame(nlabels, index = df.index[df['file'] == cat])
+            df = pd.concat([df, labels], axis = 1)
+     
+    return df
+
 # main method for testing preprocessing functions
 if __name__ == '__main__':
     datapath = '/Users/jeffreygleason 1/Desktop/NewKnowledge/Code/ASED/data'
