@@ -185,24 +185,20 @@ def cluster_emails(datapath, min_cluster_size, min_samples = 1):
     clusterer = hdbscan.HDBSCAN(min_cluster_size= min_cluster_size, min_samples=min_samples)
 
     # cluster enron and nigerian emails
+    df['labels'] = np.nan
     clusterer.fit(pd.DataFrame((df.loc[df['file'] == 'enron.jsonl']['Simon Features']).values.tolist()))
     nlabels = clusterer.labels_.max()
-    enron_labels = pd.DataFrame(clusterer.labels_, index = df.index[df['file'] == 'enron.jsonl'])
-    df = pd.concat([df, enron_labels], axis=1)
+    df.loc[df.index[df['file'] == 'enron.jsonl'], 'labels'] = clusterer.labels_
     clusterer.fit(pd.DataFrame((df.loc[df['file'] == 'nigerian.jsonl']['Simon Features']).values.tolist()))
     labels = clusterer.labels_ + nlabels + 1
-    nigerian_labels = pd.DataFrame(labels, index = df.index[df['file'] == 'nigerian.jsonl'])
-    df = pd.concat([df, nigerian_labels], axis = 1)
     nlabels = labels.max()
-
+    df.loc[df.index[df['file'] == 'nigerian.jsonl'], 'labels'] = labels
     # add cluster lablels for JPL abuse set
     # TODO - could cluster these ourselves??
     for cat in df['file'].unique():
         if cat not in ['enron.jsonl', 'nigerian.jsonl']:
             nlabels += 1
-            labels = pd.DataFrame(nlabels, index = df.index[df['file'] == cat])
-            df = pd.concat([df, labels], axis = 1)
-     
+            df.loc[df.index[df['file'] == cat], 'labels'] = nlabels
     return df
 
 # main method for testing preprocessing functions
