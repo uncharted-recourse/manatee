@@ -100,11 +100,10 @@ class robust_rcf():
         avg_codisp /= index
         # fill NAs with 0s - for points that were not sampled in any tree
         # output message saying which points were not sampled in any tree
-        print('The following points weren\'t included in any randomly sampled trees: {}'.format(np.where(avg_codisp.isna())))
+        print('{} points ({} %) weren\'t included in any randomly sampled trees:'.format(sum(avg_codisp.isna()), sum(avg_codisp.isna()) / n * 100))
         avg_codisp = avg_codisp.fillna(0)
         return avg_codisp
     
-
     def anomaly_score(self, points):
         '''
         Computes anomaly score for point by inserting point in each tree in the rcrf and
