@@ -37,6 +37,7 @@ def test_rrcf_simon(data, sample = 0.1):
     clf = robust_rcf(num_trees, tree_size)
     clf.fit_batch(simon_train)
     print('Fitting batch anomaly detection took {} seconds'.format(time.time() - start_time))
+    '''
     print('Scoring training set')
     start_time = time.time()
     anom_score = clf.batch_anomaly_scores()
@@ -48,7 +49,7 @@ def test_rrcf_simon(data, sample = 0.1):
     anom_pred = anomaly_classification_percentile(anom_score, anom_thresh)
     print("Training Set Evaluation")
     print(evaluate(y_train, anom_pred))
-
+    '''
     # eval on validation set
     print('Scoring validation set')
     start_time = time.time()
