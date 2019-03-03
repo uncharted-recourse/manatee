@@ -201,6 +201,16 @@ def cluster_emails(datapath, min_cluster_size, min_samples = 1):
             df.loc[df.index[df['file'] == cat], 'labels'] = nlabels
     return df
 
+def parse_weekly_timestamps(frame):
+    '''
+    add column with weekly timestamps to frame containing columns: days of week, hours, minutes, seconds
+    '''
+    frame['Weekly Timestamp'] = frame['Day of Week'] * 24 * 60 * 60 + \
+                                frame['Hour'] * 60 * 60 + \
+                                frame['Minute'] * 60 + \
+                                frame['Seconds']
+    return frame
+
 # main method for testing preprocessing functions
 if __name__ == '__main__':
     '''
