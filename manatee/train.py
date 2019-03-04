@@ -1,5 +1,5 @@
 from Sloth.classify import Shapelets
-from Sloth.preprocess import events_to_rates, events_to_densities
+from Sloth.preprocess import events_to_rates
 import pandas as pd
 import numpy as np
 import os.path
@@ -13,17 +13,20 @@ def data_augmentation(X_train, y_train):
         augment samples of less frequent classes
         so that all classes have same number of samples
     '''
-    values, counts = np.unique(y_train)
+    values, counts = np.unique(y_train, return_counts = True)
     max_samples = counts.max()
     initial = X_train.shape[0]
 
     for val in values:
         ixs = np.where(y_train == val)[0]
-        reps = int(max_samples / len(ixs))
-        X_train.append(X_train[ixs]*reps, ignore_index=True)
-        print("Augmented class {} with {} repetitions (of all its samples)".format(val, reps))
-    print("Before augmentation the dataset had {} samples".format(initial))
-    print("After augmentation the dataset has {} samples".format(X_train.shape[0]))
+        reps = int(max_samples / len(ixs)) - 1
+        if reps > 0:
+            X_train = np.append(X_train, X_train[ixs]*reps, axis = 0)
+            y_train = np.append(y_train, y_train[ixs]*reps, axis = 0)
+        print("Augmented class {} with {} repetitions".format(val, reps  * len(ixs)))
+    print("\nBefore augmentation the training / validation dataset had {} samples".format(initial))
+    print("After augmentation the training / validation dataset has {} samples".format(X_train.shape[0]))
+    return X_train, y_train
 
 def data_augmentation_with_noise():
     '''
@@ -39,7 +42,7 @@ def shapelet_sizes_grid_search():
     '''
     pass
 
-def batch_events_to_rates(data, index, labels_dict, series_size = 60*60, min_points = 10, num_bins = 60, density=False):
+def batch_events_to_rates(data, index, labels_dict, series_size = 60*60, min_points = 10, num_bins = 60, filter_bandwidth = 1, density=False):
     '''
         convert list of event times into rate functions using a gaussian filer.
 
@@ -52,6 +55,7 @@ def batch_events_to_rates(data, index, labels_dict, series_size = 60*60, min_poi
             min_points   minimum number of points needed to calculate rate function over series of length
                          series_size
             num_bins     number of bins to subdivide series into
+            filter_bandwidth       length of gaussian filter 
             density      whether to generate density rate functions
 
         return:
@@ -80,10 +84,8 @@ def batch_events_to_rates(data, index, labels_dict, series_size = 60*60, min_poi
         while (event_index <= event_times.max()):
             events = event_times[(event_index <= event_times) & (event_times < (event_index + series_size))]
             if len(events) >= min_points:
-                if density:
-                    rate_vals, rate_times = events_to_densities(events.values.astype(int), num_bins = num_bins)
-                else:
-                    rate_vals, rate_times = events_to_rates(events.values.astype(int), num_bins = num_bins)
+                rate_vals, rate_times = events_to_rates(events.values.astype(int), num_bins = num_bins, filter_bandwidth = filter_bandwidth,
+                        min_time = event_index, max_time = event_index + series_size, density = density)
                 series_values.append(rate_vals)
                 series_times.append(rate_times)
                 labels.append(labels_dict[val])
@@ -94,7 +96,7 @@ def batch_events_to_rates(data, index, labels_dict, series_size = 60*60, min_poi
                 print("Time series from cluster {} is too short".format(val))
             event_index += series_size
         print("{} time series were added from cluster: {}".format(val_series_count[val], val))
-    print("\nDataset Summary: \n{} total time series, length = {} hr, sampled {} times".format(series_count, series_size, num_bins))
+    print("\nDataset Summary: \n{} total time series, length = {} hr, sampled {} times".format(series_count, series_size / 60 / 60, num_bins))
     for val in index.unique():
         ct = val_series_count[val]
         print("{} time series ({} %) were added from cluster: {}".format(ct, round(ct / series_count * 100, 1), val))
@@ -104,11 +106,13 @@ def batch_events_to_rates(data, index, labels_dict, series_size = 60*60, min_poi
     series_times = np.vstack(series_times)
 
     # save series values and series times if they don't already exist
-    if not os.path.isfile("rate_values/series_values_sz_{}_hr_bins_{}_min_pts_{}.npy".format(series_size / 60 / 60, num_bins, min_points)):
-        np.save("rate_values/series_values_sz_{}_hr_bins_{}_min_pts_{}.npy".format(series_size / 60 / 60, num_bins, min_points), series_values)
-        np.save("rate_values/series_times_sz_{}_hr_bins_{}_min_pts_{}.npy".format(series_size / 60 / 60, num_bins, min_points), series_times)
-        np.save("rate_values/labels_sz_{}_hr_bins_{}_min_pts_{}.npy".format(series_size / 60 / 60, num_bins, min_points), labels)
-        output = open("rate_values/val_series_count_sz_{}_hr_bins_{}_min_pts_{}.npy".format(series_size / 60 / 60, num_bins, min_points), 'wb')
+    if not os.path.isfile("rate_values/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}/series_values.npy".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)):
+        dir_path = "sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)
+        os.mkdir("rate_values/" + dir_path)
+        np.save("rate_values/" + dir_path + "/series_values.npy", series_values)
+        np.save("rate_values/" + dir_path + "/series_times.npy", series_times)
+        np.save("rate_values/" + dir_path + "/labels.npy", labels)
+        output = open("rate_values/" + dir_path + "/val_series_count.pkl", 'wb')
         pickle.dump(val_series_count, output)
         output.close()
     return series_values, series_times, labels, val_series_count
@@ -116,18 +120,18 @@ def batch_events_to_rates(data, index, labels_dict, series_size = 60*60, min_poi
 def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, num_bins = 60, density = False):
 
     # visualize training data
-    for label in y_train:
+    for label in np.unique(y_train):
         for index in np.where(y_train == label)[0][:2]:
-            plt.scatter(np.arange(X_train.shape[1]), X_train[index])
+            plt.plot(np.arange(X_train.shape[1]), X_train[index])
             time_unit = series_size / num_bins / 60
-            if series_size == 1:
+            if time_unit == 1:
                 plt.xlabel('Minute of the Hour')
-            elif series_size == 0.5:
+            elif time_unit == 0.5:
                 plt.xlabel('Half Minute of the Hour')
             if density:
                 plt.ylabel('Email Density')
             else:
-                plt.ylabel('Emails per Second')
+                plt.ylabel('Emails per Minute')
             if label == 1:
                 plt.title('Example of Anomalous Rate Function')
             else:
@@ -135,6 +139,7 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, 
             plt.show()
 
     # data augmentation
+    X_train, y_train = data_augmentation(X_train, y_train)
 
     # shapelet classifier
     epochs = 100
@@ -144,18 +149,19 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, 
     learning_rate = .01
     weight_regularizer = .01
     #source_dir = ''
-    print("Fitting Shapelet Classifier")
+    val_split = 1 / 3
+    print("\nFitting Shapelet Classifier on {} Training Time Series".format(int((1 - val_split) * X_train.shape[0])))
     clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
     inds = np.arange(X_train.shape[0])
     np.random.shuffle(inds)
     X_train = X_train[inds]
     y_train = y_train[inds]
-    val_split = int(0.3 * X_train.shape[0])
     model = clf.fit(X_train, y_train)
     
     # evaluate after full training
+    val_split = int(val_split * X_train.shape[0])
     y_pred = clf.predict(X_train[-val_split:])
-    print('Evaluation on Randomly Shuffled Validation Set')
+    print('\nEvaluation on Randomly Shuffled Validation Set with {} Validation Time Series'.format(val_split))
     evaluate(y_train[-val_split:], y_pred)
 
     # visualize 
@@ -167,7 +173,7 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, 
         rates = X_train[-val_split:]
         y_true = y_train[-val_split:]
         for i in np.arange(3):
-            plt.scatter(np.arange(len(rates[0]), rates[i]))
+            plt.plot(np.arange(len(rates[0])), rates[i])
             time_unit = series_size / num_bins / 60
             if series_size == 1:
                 plt.xlabel('Minute of the Hour')
@@ -177,38 +183,39 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, 
                 plt.ylabel('Email Density')
             else:
                 plt.ylabel('Emails per Second')
-            if y_true == 1 and y_pred == 1:
+            if y_true[i] == 1 and y_pred[i] == 1:
                 plt.title('Correct Classification: Anomalous')
-            elif y_true == 1 and y_pred == 0:
+            elif y_true[i] == 1 and y_pred[i] == 0:
                 plt.title('Incorrect Classification: True = Anomalous, Predicted = Non-Anomalous')
-            elif y_true == 0 and y_pred == 1:
+            elif y_true[i] == 0 and y_pred[i] == 1:
                 plt.title('Incorrect Classification: True = Non-Anomalous, Predicted = Anomalous')
             else:
                 plt.title('Correct Classification: Non-Anomalous')
             plt.show()
             clf.VisualizeShapeletLocations(rates, i)
-
+    
     # hyperparameter optimization
 
     # shapelet sizes grid search
 
     # epoch optimization with best HPs and shapelet sizes
-    pass
 
 # main method for training methods
 if __name__ == '__main__':
     series_size = 60 * 60
     num_bins = 60
     min_points = 10
+    filter_bandwidth = 1
     density = True
     data = pd.read_pickle('../../all_emails_clustered.pkl')
     data = parse_weekly_timestamps(data)        # add weekly timestamps
     index = data['file']
 
-    if os.path.isfile("rate_values/series_values_sz_{}_hr_bins_{}_min_pts_{}.npy".format(series_size / 60 / 60, num_bins, min_points)):
-        series_values = np.load("rate_values/series_values_sz_{}_hr_bins_{}_min_pts_{}.npy".format(series_size / 60 / 60, num_bins, min_points))
-        labels = np.load("rate_values/labels_sz_{}_hr_bins_{}_min_pts_{}.npy".format(series_size / 60 / 60, num_bins, min_points))
-        pkl_file = open("rate_values/val_series_count_sz_{}_hr_bins_{}_min_pts_{}.npy".format(series_size / 60 / 60, num_bins, min_points), 'rb')
+    if os.path.isfile("rate_values/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}/series_values.npy".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)):
+        dir_path = "sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)
+        series_values =  np.load("rate_values/" + dir_path + "/series_values.npy")
+        labels =  np.load("rate_values/" + dir_path + "/labels.npy")
+        pkl_file = open("rate_values/" + dir_path + "/val_series_count.pkl", 'rb')
         val_series_count = pickle.load(pkl_file)
         pkl_file.close()
         series_count = 0
@@ -225,8 +232,11 @@ if __name__ == '__main__':
                 labels_dict[val] = 0
             else:
                 labels_dict[val] = 1
-        series_values, series_times, labels, val_series_count = batch_events_to_rates(data['Weekly Timestamp'], index, labels_dict, num_bins = num_bins, density = density)
-    '''
-    train_shapelets(series_values.reshape(-1, series_values.shape[1], 1), labels, 
+        ## TODO - BATCH EVENTS TO RATES hp optimization / fidelity - series_size, num_bins, min_points, filter_bandwidth
+        series_values, series_times, labels, val_series_count = \
+            batch_events_to_rates(data['Weekly Timestamp'], index, labels_dict, series_size = series_size, min_points = min_points, 
+                num_bins = num_bins, filter_bandwidth = filter_bandwidth, density = density)
+    train_split = int(0.9 * series_values.shape[0])
+    train_shapelets(series_values[:train_split].reshape(-1, series_values.shape[1], 1), labels[:train_split], 
                     visualize=True, series_size = series_size, num_bins = num_bins, density=density)
-    '''
+    
