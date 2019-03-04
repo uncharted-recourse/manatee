@@ -120,24 +120,25 @@ def batch_events_to_rates(data, index, labels_dict, series_size = 60*60, min_poi
 def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, num_bins = 60, density = False):
 
     # visualize training data
-    for label in np.unique(y_train):
-        for index in np.where(y_train == label)[0][:2]:
-            plt.plot(np.arange(X_train.shape[1]), X_train[index])
-            time_unit = series_size / num_bins / 60
-            if time_unit == 1:
-                plt.xlabel('Minute of the Hour')
-            elif time_unit == 0.5:
-                plt.xlabel('Half Minute of the Hour')
-            if density:
-                plt.ylabel('Email Density')
-            else:
-                plt.ylabel('Emails per Minute')
-            if label == 1:
-                plt.title('Example of Anomalous Rate Function')
-            else:
-                plt.title('Example of Non-Anomalous Rate Function')
-            plt.show()
-
+    if visualize:
+        for label in np.unique(y_train):
+            for index in np.where(y_train == label)[0][:2]:
+                plt.plot(np.arange(X_train.shape[1]), X_train[index])
+                time_unit = series_size / num_bins / 60
+                if time_unit == 1:
+                    plt.xlabel('Minute of the Hour')
+                elif time_unit == 0.5:
+                    plt.xlabel('Half Minute of the Hour')
+                if density:
+                    plt.ylabel('Email Density')
+                else:
+                    plt.ylabel('Emails per Minute')
+                if label == 1:
+                    plt.title('Example of Anomalous Rate Function')
+                else:
+                    plt.title('Example of Non-Anomalous Rate Function')
+                plt.show()
+    
     # data augmentation
     X_train, y_train = data_augmentation(X_train, y_train)
 
@@ -173,27 +174,53 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, 
         rates = X_train[-val_split:]
         y_true = y_train[-val_split:]
         for i in np.arange(3):
-            plt.plot(np.arange(len(rates[0])), rates[i])
-            time_unit = series_size / num_bins / 60
-            if series_size == 1:
-                plt.xlabel('Minute of the Hour')
-            elif series_size == 0.5:
-                plt.xlabel('Half Minute of the Hour')
-            if density:
-                plt.ylabel('Email Density')
-            else:
-                plt.ylabel('Emails per Second')
             if y_true[i] == 1 and y_pred[i] == 1:
-                plt.title('Correct Classification: Anomalous')
+                print('Correct Classification: Anomalous')
             elif y_true[i] == 1 and y_pred[i] == 0:
-                plt.title('Incorrect Classification: True = Anomalous, Predicted = Non-Anomalous')
+                print('Incorrect Classification: True = Anomalous, Predicted = Non-Anomalous')
             elif y_true[i] == 0 and y_pred[i] == 1:
-                plt.title('Incorrect Classification: True = Non-Anomalous, Predicted = Anomalous')
+                print('Incorrect Classification: True = Non-Anomalous, Predicted = Anomalous')
             else:
-                plt.title('Correct Classification: Non-Anomalous')
-            plt.show()
-            clf.VisualizeShapeletLocations(rates, i)
-    
+                print('Correct Classification: Non-Anomalous')
+            clf.VisualizeShapeletLocations(rates, i, series_size, num_bins, density)
+
+    # Shapelet test - track over time
+    track = np.array([])
+    for i in range(10):
+        track = np.append(track, i * 0.01)
+    track = np.append(track, track[::-1])
+
+    # Beginning
+    track_beg = np.pad(track, (0, num_bins - len(track)), 'constant')
+    track_beg = track_beg.reshape(1, track_beg.shape[0], 1)
+    track_pred = clf.predict(track_beg)
+    if track_pred:
+        print('Classification: Anomalous')
+    else:
+        print('Classification: Non-Anomalous')
+    clf.VisualizeShapeletLocations(track_beg, 0, series_size, num_bins, density)
+
+    # Middle
+    l = int((num_bins - len(track)) / 2)
+    track_mid = np.pad(track, (l, l), 'constant')
+    track_mid = track_mid.reshape(1, track_mid.shape[0], 1)
+    track_pred = clf.predict(track_mid)
+    if track_pred:
+        print('Classification: Anomalous')
+    else:
+        print('Classification: Non-Anomalous')
+    clf.VisualizeShapeletLocations(track_mid, 0, series_size, num_bins, density)
+
+    # End
+    track_end = np.pad(track, (num_bins - len(track), 0), 'constant')
+    track_end = track_end.reshape(1, track_end.shape[0], 1)
+    track_pred = clf.predict(track_end)
+    if track_pred:
+        print('Classification: Anomalous')
+    else:
+        print('Classification: Non-Anomalous')
+    clf.VisualizeShapeletLocations(track_end, 0, series_size, num_bins, density)
+
     # hyperparameter optimization
 
     # shapelet sizes grid search
@@ -238,5 +265,5 @@ if __name__ == '__main__':
                 num_bins = num_bins, filter_bandwidth = filter_bandwidth, density = density)
     train_split = int(0.9 * series_values.shape[0])
     train_shapelets(series_values[:train_split].reshape(-1, series_values.shape[1], 1), labels[:train_split], 
-                    visualize=True, series_size = series_size, num_bins = num_bins, density=density)
+                    visualize=False, series_size = series_size, num_bins = num_bins, density=density)
     
