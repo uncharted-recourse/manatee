@@ -149,7 +149,7 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, 
     num_shapelets = 0.1
     learning_rate = .01
     weight_regularizer = .01
-    #source_dir = ''
+    source_dir = '../shapelets'
     val_split = 1 / 3
     print("\nFitting Shapelet Classifier on {} Training Time Series".format(int((1 - val_split) * X_train.shape[0])))
     clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
@@ -157,7 +157,7 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, 
     np.random.shuffle(inds)
     X_train = X_train[inds]
     y_train = y_train[inds]
-    model = clf.fit(X_train, y_train)
+    model = clf.fit(X_train, y_train, source_dir = source_dir)
     
     # evaluate after full training
     val_split = int(val_split * X_train.shape[0])
@@ -221,6 +221,7 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, 
         print('Classification: Non-Anomalous')
     clf.VisualizeShapeletLocations(track_end, 0, series_size, num_bins, density)
 
+    clf.clear_session()
     # hyperparameter optimization
 
     # shapelet sizes grid search
