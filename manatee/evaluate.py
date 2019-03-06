@@ -16,12 +16,11 @@ def anomaly_classification_zscore(anomaly_scores, zscore):
     zscores = stats.zscore(anomaly_scores)
     return (zscores > zscore).astype(int)
 
-def evaluate(y_truth, y_pred):
+def evaluate(y_truth, y_pred, target_names = ['non-anomalous', 'anomalous']):
     '''
         Evaluation utility prints out the sklearn classification report
         and accuracy score for the comparison between y_truth and y_pred
     '''
     print('Evaluating on {} predictions'.format(len(y_pred)))
     print("Accuracy = ", accuracy_score(y_truth, y_pred))
-    target_names = ['non-anomalous', 'anomalous']  # anomalous = predict: 1
     print(classification_report(y_truth, y_pred, target_names=target_names))
