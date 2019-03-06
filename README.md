@@ -1,5 +1,7 @@
 # New Knowledge's Shapelet Time Series Classifier
 
+The acronym manatee stands for **M**ethods for **A**nomaly **N**otification **A**gainst **T**im**E**-series **E**vidence
+
 Assumptions in data labeling:
 
 1. 419 emails are labeled as spam
