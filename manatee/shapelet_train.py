@@ -8,6 +8,9 @@ from manatee.preprocess import parse_weekly_timestamps
 import matplotlib.pyplot as plt
 import pickle
 from tslearn.preprocessing import TimeSeriesScalerMinMax
+#from sklearn.cross_validation import StratifiedKFold
+from sklearn.metrics import accuracy_score
+from keras.models import load_model
 
 def data_augmentation(X_train, y_train, random_seed = 0):
     '''
@@ -128,19 +131,14 @@ def batch_events_to_rates(data, index, labels_dict = None, series_size = 60*60, 
             np.save(dir_path + "/labels_binary.npy", labels)
     return series_values, series_times, labels, val_series_count
 
-def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60, 
-    num_bins = 60, density = False, p_threshold = 0.5, transfer = False):
+def train_shapelets(X_train, y_train, visualize = False, epochs = 100, length = 0.1, num_shapelet_lengths = 2,
+    num_shapelets = .2, learning_rate = .01, weight_regularizer = .01, series_size = 60 * 60, 
+    num_bins = 60, density = False, p_threshold = 0.5, transfer = False, val_data = None, test_data = None, clf = None):
 
     # shapelet classifier
-    epochs = 100
-    length = 0.1
-    num_shapelet_lengths = 1
-    num_shapelets = 0.1
-    learning_rate = .01
-    weight_regularizer = .01
     source_dir = 'shapelets'
     val_split = 1 / 3
-    clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
+    clf = clf or Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
 
     # visualize training data
     if visualize:
@@ -163,13 +161,14 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60,
                 plt.show()
     
     # split into training and validation sets
+    np.random.seed(0)
     inds = np.arange(X_train.shape[0])
     np.random.shuffle(inds)
     X_train = X_train[inds]
     y_train = y_train[inds]
     val_split = int(val_split * X_train.shape[0])
     X_train, y_train = X_train[:-val_split], y_train[:-val_split]
-    X_val, y_val = X_train[-val_split:], y_train[-val_split:]
+    X_val, y_val = (val_data) or (X_train[-val_split:], y_train[-val_split:])
 
     # data augmentation
     X_train, y_train = data_augmentation(X_train, y_train)
@@ -177,17 +176,36 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60,
     # shapelet classifier
     if not transfer:
         print("\nFitting Shapelet Classifier on {} Training Time Series".format(X_train.shape[0]))
-        model = clf.fit(X_train, y_train, source_dir = source_dir, val_data = (X_val, y_val))
+        
+        model = clf.generate_model(60, 2)
+        model.load_weights("checkpoints/shapelets2019-03-08_01-19-31_61-0.4997.h5")
+        clf.encode(y_train)
+        
+        #model = clf.fit(X_train, y_train, source_dir = source_dir, val_data = (X_val, y_val))
+        #print(clf.shapelet_clf.model.summary())
+        #print(model.summary())
     else:
         print("\nFitting Shapelet Classifer on {} Training Time Series. Transfer Learned from Binary Setting".format(X_train.shape[0]))
-        model = clf.fit_transfer_model(X_train, y_train, "deployed_checkpoints/shapelets2019-03-04_21-45-06_99-0.5900.h5", source_dir = source_dir, val_data = (X_val, y_val))
+        model = clf.fit_transfer_model(X_train, y_train, "deployed_checkpoints/shapelets2019-03-07_20-41-55_81-0.5743.h5", source_dir = source_dir, val_data = (X_val, y_val))
         
     # evaluate after full training
-    y_pred = clf.predict_proba(X_val)
+    X_val = TimeSeriesScalerMinMax().fit_transform(X_val)
+    y_pred = model.predict(X_val)
+    #y_pred = clf.predict_proba(X_val)
+    print(y_pred)
     y_preds, conf = clf.decode(y_pred, p_threshold)
     print('\nEvaluation on Randomly Shuffled Validation Set with {} Validation Time Series'.format(X_val.shape[0]))
-    targets = clf.get_classes()
-    evaluate(y_val, y_preds, target_names=targets)
+    #targets = clf.get_classes()
+    evaluate(y_val, y_preds)#, target_names=targets)
+    print('Test Eval')
+    X_test = TimeSeriesScalerMinMax().fit_transform(test_data[0])
+
+    y_pred = model.predict(X_test)
+    #y_pred = clf.predict_proba(test_data[0])
+    print(y_pred)
+    y_preds, conf = clf.decode(y_pred, p_threshold)
+    evaluate(test_data[1],y_preds)
+    #return accuracy_score(y_val, y_preds)
 
     # visualize 
     if visualize:
@@ -198,13 +216,13 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60,
         rates = X_train[-val_split:]
         y_true = y_train[-val_split:]
         for i in np.arange(3):
-            if y_true[i] == 1 and y_pred[i] == 1:
+            if y_true[i] == 1 and y_preds[i] == 1:
                 print('Correct Classification: Anomalous')
-            elif y_true[i] == 1 and y_pred[i] == 0:
+            elif y_true[i] == 1 and y_preds[i] == 0:
                 print('Incorrect Classification: True = Anomalous, Predicted = Non-Anomalous')
-            elif y_true[i] == 0 and y_pred[i] == 1:
+            elif y_true[i] == 0 and y_preds[i] == 1:
                 print('Incorrect Classification: True = Non-Anomalous, Predicted = Anomalous')
-            else:
+            elif y_true[i] == 0 and y_preds[i] == 0:
                 print('Correct Classification: Non-Anomalous')
             clf.VisualizeShapeletLocations(rates, i, series_size, num_bins, density)
 
@@ -250,6 +268,32 @@ def train_shapelets(X_train, y_train, visualize = False, series_size = 60 * 60,
     # shapelet sizes grid search
 
     # epoch optimization with best HPs and shapelet sizes
+'''        
+def series_size_cv_grid_search(series_values, labels, min = 15 * 60, max = 120*60, step = 15*60, num_bins = 60, 
+    min_points = 1, filter_bandwidth = 1, epochs=100, length=0.1, num_shapelet_lengths=1, learning_rate=.01,
+    weight_regularizer = .01):
+    
+        grid search over different series size values with 5 fold cross validation. graph results
+    
+    n_folds = 5
+    skf = StratifiedKFold(labels, n_folds = n_fods, shuffle = True)
+
+    X_train, y_train, visualize = False, series_size = 60 * 60, 
+    num_bins = 60, density = False, p_threshold = 0.5, transfer = False, val_data = None, clf = None):
+
+    # shapelet classifier
+    clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
+
+    val_acc = []
+    for x in range(min, max, step):
+        val_acc = []
+        print("Evaluating series size {}".format(x))
+        for i, (train, val) in enumerate(skf):
+            print("Running fold {} of {}".format(i+1, n_folds))
+            val_acc.append(train_shapelets(series_values[train].reshape(-1, series_values.shape[1], 1), labels[y_train],
+                series_size = x, num_bins = num_bins, min_points = min_points, filter_bandwidth = filter_bandwidth,
+                )
+'''
 
 # main method for training methods
 if __name__ == '__main__':
@@ -293,5 +337,5 @@ if __name__ == '__main__':
 
     train_split = int(0.9 * series_values.shape[0])
     train_shapelets(series_values[:train_split].reshape(-1, series_values.shape[1], 1), labels[:train_split], 
-                    visualize=False, series_size = series_size, num_bins = num_bins, density=density)
+                    visualize=True, series_size = series_size, num_bins = num_bins, density=density)
     

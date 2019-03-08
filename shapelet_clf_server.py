@@ -14,6 +14,7 @@ import tensorflow as tf
 
 from Sloth.classify import Shapelets
 from Sloth.preprocess import events_to_rates
+from tslearn.preprocessing import TimeSeriesScalerMinMax
 
 import grpc
 import logging
@@ -36,8 +37,8 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
         # set shapelet HPs
         self.EPOCHS = 100
         self.LENGTH = 0.1
-        self.NUM_SHAPELET_LENGTHS = 1
-        self.NUM_SHAPELETS = 0.1
+        self.NUM_SHAPELET_LENGTHS = 2
+        self.NUM_SHAPELETS = 0.2
         self.LEARNING_RATE = .01
         self.WEIGHT_REGULARIZER = .01
 
@@ -93,11 +94,14 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
             print('This series has {} points, but at least {} are needed for classification'.format(len(self.series), self.MIN_POINTS))
             return result
         
-        # transform series to rate function and make prediction
+        # transform series to rate function, scale, and make prediction
         max_time = min(self.series) + self.SERIES_LENGTH
-        series_values, _ = events_to_rates(self.series, filter_bandwidth = self.FILTER_BANDWIDTH, num_bins = self.NUM_BINS, max_time = max_time)
-        print(series_values)
-        y_probs = self.model.predict(series_values.reshape((1, len(series_values), 1)))
+        series_values, _ = events_to_rates(self.series, filter_bandwidth = self.FILTER_BANDWIDTH, max_time = max_time, num_bins = self.NUM_BINS, density = True)
+        series_values = series_values.reshape((1, len(series_values), 1))
+        series_values = TimeSeriesScalerMinMax().fit_transform(series_values)
+
+        y_probs = self.model.predict(series_values)
+        print(y_probs)
         pred, confidence = self.clf.decode(y_probs,P_THRESHOLD)
         print("Classification result is (class / confidence): {} / {}".format(pred, confidence))
 

@@ -18,7 +18,7 @@ if os.path.isfile("manatee/rate_values/sz_{}_hr_bins_{}_min_pts_{}_filter_width_
     dir_path = "sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)
     series_values =  np.load("manatee/rate_values/" + dir_path + "/series_values.npy")
     # change this line from 'labels.npy' to 'labels_multi.npy' for binary vs. multiclass
-    labels =  np.load("manatee/rate_values/" + dir_path + "/labels_multi.npy")
+    labels =  np.load("manatee/rate_values/" + dir_path + "/labels.npy")
     pkl_file = open("manatee/rate_values/" + dir_path + "/val_series_count.pkl", 'rb')
     val_series_count = pickle.load(pkl_file)
     pkl_file.close()
@@ -49,9 +49,19 @@ else:
         batch_events_to_rates(data['Weekly Timestamp'], index, labels_dict, series_size = series_size, min_points = min_points, 
             num_bins = num_bins, filter_bandwidth = filter_bandwidth, density = density)
 
+# randomly shuffle before splitting into training / test / val
+
+np.random.seed(0)
+randomize = np.arange(len(series_values))
+np.random.shuffle(randomize)
+series_values = series_values[randomize]
+labels = labels[randomize]
+#print(labels[:100])
+# train
 train_split = int(0.9 * series_values.shape[0])
 train_shapelets(series_values[:train_split].reshape(-1, series_values.shape[1], 1), labels[:train_split], 
-                visualize=False, series_size = series_size, num_bins = num_bins, density=density, p_threshold=0.05, transfer=True)
+                visualize=False, series_size = series_size, num_bins = num_bins, density=density, p_threshold=0.5, 
+                transfer=False, test_data=(series_values[train_split:].reshape(-1, series_values.shape[1], 1), labels[train_split:]))
 
 # CHANGES FOR MULTICLASS
 

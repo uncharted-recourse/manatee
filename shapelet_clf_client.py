@@ -12,37 +12,42 @@ import grapevine_pb2
 import grapevine_pb2_grpc
 import time
 import json
+import numpy as np
+import pandas as pd
+from manatee.preprocess import parse_weekly_timestamps
 
 def run():
 
     channel = grpc.insecure_channel('localhost:' + GRPC_PORT)
     stub = grapevine_pb2_grpc.ClassifierStub(channel)
 
-    # create 100 emails (one every 10 seconds) - hopefully these time series will be classified as HAM
+    # 1 email every 10 seconds - hopefully these will be classified as HAM
+    n=100
     timestamp = int(time.time())
-    n = 100
     for i in range(n):
+        timestamp += 10
         testMessage = grapevine_pb2.Message(
             raw="This raw field isn't used by shapelet classifier, only createdAt field",
             text="This text field isn't used by shapelet classifier, only createdAt field",
             language = "This text field isn't used by shapelet classifier, only createdAt field", 
-            createdAt = timestamp + i * 10
+            createdAt = timestamp
         )
         classification = stub.Classify(testMessage)
         print('Classifier returned this classification for email {} of {} HAM example (class / confidence): {} / {}'.format(i + 1, n, classification.prediction, classification.confidence))
     
-    # add spike of 100 emails (one every second) - hopefully these time series will be classified as SPAM
-    i = 0
+    # add spike of 1000 emails (1 / second) - hopefully these time series will be classified as SPAM
+    n=1000
     for i in range(n):
+        timestamp += 1
         testMessage = grapevine_pb2.Message(
             raw="This raw field isn't used by shapelet classifier, only createdAt field",
             text="This text field isn't used by shapelet classifier, only createdAt field",
             language = "This text field isn't used by shapelet classifier, only createdAt field", 
-            createdAt = timestamp + i
+            createdAt = timestamp 
         )
         classification = stub.Classify(testMessage)
         print('Classifier returned this classification for email {} of {} SPAM example (class / confidence): {} / {}'.format(i + 1, n, classification.prediction, classification.confidence))
-    
+
 if __name__ == '__main__':
     logging.basicConfig() # purpose?
     config = configparser.ConfigParser()
