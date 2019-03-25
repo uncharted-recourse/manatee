@@ -6,13 +6,13 @@ import time
 import nltk
 import numpy as np
 import pandas as pd
-from Simon import *
-from Simon.Encoder import *
-from Simon.DataGenerator import *
-from Simon.LengthStandardizer import *
+#from Simon import *
+#from Simon.Encoder import *
+#from Simon.DataGenerator import *
+#from Simon.LengthStandardizer import *
 from keras.models import Model
 from keras.layers import Input, Lambda, Convolution1D, Dropout, MaxPooling1D, merge, LSTM, TimeDistributed, Dense
-
+from sklearn.cluster import KMeans
 
 def parse_time_features(timestamp):
     '''
@@ -32,6 +32,7 @@ def parse_timestamp(date):
     elif date[19]=='-':
         timestamp+=timedelta(hours=int(date[20:22]), minutes = int(date[23:]))
     return parse_time_features(timestamp)
+
 
 def generate_feature_model():
     '''
@@ -201,6 +202,36 @@ def cluster_emails(datapath, min_cluster_size, min_samples = 1):
             df.loc[df.index[df['file'] == cat], 'labels'] = nlabels
     return df
 
+def cluster_emails_kmeans(datapath, n_clusters_enron = 50):
+
+    # choose number of kmeans clusters to try to approximately equalize number of events / series 
+
+    # load data from saved file
+    data = np.load(datapath)['all_emails']
+    df = pd.DataFrame(data, columns = ['Timestamp','Year', 'Month', 'Day of Month', 'Day of Week', 'Hour', 'Minute', 'Seconds', 'Simon Features', 'file'])
+
+    # cluster enron and nigerian emails
+    df['kmeans'] = np.nan
+    enron_data = pd.DataFrame((df.loc[df['file'] == 'enron.jsonl']['Simon Features']).values.tolist())
+    kmeans = KMeans(n_clusters = n_clusters_enron).fit(enron_data)
+    nlabels = kmeans.labels_.max()
+    df.loc[df.index[df['file'] == 'enron.jsonl'], 'kmeans'] = kmeans.labels_
+
+    '''
+    nigerian_data = pd.DataFrame((df.loc[df['file'] == 'nigerian.jsonl']['Simon Features']).values.tolist())
+    kmeans_enron.fit(nigerian_data)
+    labels = kmeans_enron.predict(nigerian_data)
+    nlabels = labels.max()
+    df.loc[df.index[df['file'] == 'nigerian.jsonl'], 'kmeans'] = labels
+    '''
+
+    # add cluster lablels for JPL abuse set
+    for cat in df['file'].unique():
+        if cat not in ['enron.jsonl']:
+            nlabels += 1
+            df.loc[df.index[df['file'] == cat], 'kmeans'] = nlabels
+    return df
+
 def parse_weekly_timestamps(frame):
     '''
     add column with weekly timestamps to frame containing columns: days of week, hours, minutes, seconds
@@ -219,6 +250,6 @@ if __name__ == '__main__':
     print(all_emails.shape)
     np.savez('all_emails_parsed.npz', all_emails = all_emails)
     '''
-    data = 'all_emails_parsed.npz'
-    df = cluster_emails(data, min_cluster_size=60)
-    df.to_pickle('all_emails_clustered.pkl')
+    data = '../../all_emails_parsed.npz'
+    df = cluster_emails_kmeans(data)
+    df.to_pickle('../../all_emails_kmeans_clustered.pkl')

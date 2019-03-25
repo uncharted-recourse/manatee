@@ -35,22 +35,22 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
         self.series = []
 
         # set shapelet HPs
-        self.EPOCHS = 100
-        self.LENGTH = 0.1
-        self.NUM_SHAPELET_LENGTHS = 2
-        self.NUM_SHAPELETS = 0.2
+        self.EPOCHS = 100 # dummy, not training here
+        self.LENGTH = 0.05
+        self.NUM_SHAPELET_LENGTHS = 12
+        self.NUM_SHAPELETS = 0.25
         self.LEARNING_RATE = .01
-        self.WEIGHT_REGULARIZER = .01
+        self.WEIGHT_REGULARIZER = .001
 
          # set rate function HPs
-        self.SERIES_LENGTH = 3600 # series length in seconds
-        self.MIN_POINTS = 10
-        self.NUM_BINS = 60
-        self.FILTER_BANDWIDTH = 1
+        self.SERIES_LENGTH = 240 * 60 # series length in seconds
+        self.MIN_POINTS = 5
+        self.NUM_BINS = 300
+        self.FILTER_BANDWIDTH = 2
 
         # instantiate shapelet clf and model object using deployed weights
         self.clf = Shapelets(self.EPOCHS, self.LENGTH, self.NUM_SHAPELET_LENGTHS, self.NUM_SHAPELETS, self.LEARNING_RATE, self.WEIGHT_REGULARIZER)
-        self.model = self.clf.generate_model(int(self.SERIES_LENGTH / 60), len(CATEGORIES.split(',')))
+        self.model = self.clf.generate_model(int(self.NUM_BINS), len(CATEGORIES.split(',')))
         print('Load weights...')
         self.model.load_weights("deployed_checkpoints/" + MODEL_OBJECT)
         self.model._make_predict_function()
@@ -66,7 +66,7 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
             prediction='false',
             confidence=0.0,
             model="NK_shapelet_classifer",
-            version="0.0.1",
+            version="0.0.2",
             meta=grapevine_pb2.Meta(),
         )
 
@@ -86,7 +86,7 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
         # delete old timestamps if necessary
         while max(self.series) - min(self.series) > (self.SERIES_LENGTH):
             print('Deleting point {} from series'.format(self.series.index(min(self.series))))
-            del self.series[self.series.index(min(self.series))] 
+            del self.series[self.series.index(min(self.series))]
 
         # check if >= min_points exist in the series
         if len(self.series) < self.MIN_POINTS:
@@ -96,7 +96,7 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
         
         # transform series to rate function, scale, and make prediction
         max_time = min(self.series) + self.SERIES_LENGTH
-        series_values, _ = events_to_rates(self.series, filter_bandwidth = self.FILTER_BANDWIDTH, max_time = max_time, num_bins = self.NUM_BINS, density = True)
+        series_values, _ = events_to_rates(self.series, filter_bandwidth = self.FILTER_BANDWIDTH, max_time = max_time, min_time = min(self.series), num_bins = self.NUM_BINS, density = True)
         series_values = series_values.reshape((1, len(series_values), 1))
         series_values = TimeSeriesScalerMinMax().fit_transform(series_values)
 

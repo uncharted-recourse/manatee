@@ -3,14 +3,17 @@ from Sloth.preprocess import events_to_rates
 import pandas as pd
 import numpy as np
 import os.path
+#from evaluate import evaluate
+#from preprocess import parse_weekly_timestamps
 from manatee.evaluate import evaluate
 from manatee.preprocess import parse_weekly_timestamps
 import matplotlib.pyplot as plt
 import pickle
 from tslearn.preprocessing import TimeSeriesScalerMinMax
-#from sklearn.cross_validation import StratifiedKFold
-from sklearn.metrics import accuracy_score
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import accuracy_score, f1_score
 from keras.models import load_model
+from keras.optimizers import Adam, Adagrad, RMSprop
 
 def data_augmentation(X_train, y_train, random_seed = 0):
     '''
@@ -40,12 +43,83 @@ def data_augmentation_with_noise():
     '''
     pass
 
-def shapelet_sizes_grid_search():
+def shapelet_sizes_grid_search(series_size = 240*60, num_bins = 300, n_folds = 5, 
+    min_points = 5, filter_bandwidth = 2, density = True, epochs=100, length=[.025, .05], num_shapelet_lengths=[6,9,12], 
+    num_shapelets = .2, learning_rate=.01, weight_regularizer = .01, random_state = 0):
     '''
         grid search over different shapelet dictionary options
         from Grabocka paper
     '''
-    pass
+    acc = 0
+    f1_macro = 0
+    f1_weighted = 0
+    best_min_l_acc = None
+    best_num_l_acc = None
+    best_min_l_f1_macro = None
+    best_num_l_f1_macro = None
+    best_min_l_f1_weighted = None
+    best_num_l_f1_weighted = None
+
+    # create rate values if they don't already exist
+    dir_path = "kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)
+    series_values =  np.load("rate_values/" + dir_path + "/series_values.npy")
+    labels =  np.load("rate_values/" + dir_path + "/labels.npy")
+
+    # randomly shuffle before splitting into training / test / val
+    np.random.seed(random_state)
+    randomize = np.arange(len(series_values))
+    np.random.shuffle(randomize)
+    series_values = series_values[randomize]
+    labels = labels[randomize]
+    train_split = int(0.9 * series_values.shape[0])
+
+    # write HP combination results to file
+    file = open('hp_shp_sizes_grid_search_results.txt', 'a+')
+    file.write('%s,%s,%s,%s,%s\n' % ('Min Length', 'Num Shapelet Lengths', 'Accuracy', 'F1 Macro', 'F1 Weighted'))
+    file.close()
+
+    for min_length in length:
+        for num_lengths in num_shapelet_lengths:
+
+            # CV
+            skf = StratifiedKFold(n_splits= n_folds, shuffle = True)
+            val_acc = []
+            val_f1_macro = []
+            val_fl_weighted = []
+
+            print("Evaluating {} shapelet lengths starting at a minimum length of {}".format(num_lengths, min_length))
+            for i, (train, val) in enumerate(skf.split(series_values[:train_split], labels[:train_split])):
+                print("Running fold {} of {}".format(i+1, n_folds))
+                acc_val, f1_macro_val, f1_weighted_val = train_shapelets(series_values[train].reshape(-1, series_values.shape[1], 1), labels[train],
+                    series_size = series_size, num_bins = num_bins, density=density, length = min_length, num_shapelet_lengths=num_lengths,
+                    val_data=(series_values[val].reshape(-1, series_values.shape[1], 1), labels[val]))
+                val_acc.append(acc_val)
+                val_f1_macro.append(f1_macro_val)
+                val_fl_weighted.append(f1_weighted_val)
+
+            # write mean values
+            file = open('hp_shp_sizes_grid_search_results.txt', 'a+')
+            file.write('%s,%s,%s,%s,%s\n' % (min_length, num_lengths, np.mean(val_acc),
+                np.mean(val_f1_macro), np.mean(val_fl_weighted)))
+            file.close()
+            
+            if np.mean(val_acc) > acc:
+                best_min_l_acc = min_length
+                best_num_l_acc = num_lengths
+                acc = np.mean(val_acc)
+            if np.mean(val_f1_macro) > f1_macro:
+                best_min_l_f1_macro = min_length
+                best_num_l_f1_macro = num_lengths
+                f1_macro = np.mean(val_f1_macro)
+            if np.mean(val_fl_weighted) > f1_weighted:
+                best_min_l_f1_weighted = min_length
+                best_num_l_f1_weighted = num_lengths
+                f1_weighted = np.mean(val_fl_weighted)
+
+    # return best result
+    print("The best accuracy was {} at min length {} and number of lengths {}".format(acc, best_min_l_acc, best_num_l_acc))
+    print("The best f1 macro was {} at min length {} and number of lengths {}".format(f1_macro, best_min_l_f1_macro, best_num_l_acc))
+    print("The best f1 weighted was {} at min length {} and number of lengths {}".format(f1_weighted, best_min_l_f1_weighted, best_num_l_f1_weighted))
 
 def batch_events_to_rates(data, index, labels_dict = None, series_size = 60*60, min_points = 10, num_bins = 60, filter_bandwidth = 1, density=True):
     '''
@@ -82,8 +156,10 @@ def batch_events_to_rates(data, index, labels_dict = None, series_size = 60*60, 
     labels = []
     series_count = 0
     val_series_count = {}
+    avg_event_count = {}
     for val in index.unique():
         val_series_count[val] = 0
+        avg_event_count[val] = 0
         event_times = data.loc[index == val]
 
         # iterate through event times by series size -> only convert to rate function if >= min_points events
@@ -103,18 +179,23 @@ def batch_events_to_rates(data, index, labels_dict = None, series_size = 60*60, 
             else:
                 print("Time series from cluster {} is too short".format(val))
             event_index += series_size
+            avg_event_count[val] += len(events)
         print("{} time series were added from cluster: {}".format(val_series_count[val], val))
+        if val_series_count[val]:
+            print("Time series were added from cluster: {} have an average of {} ecents".format(val, avg_event_count[val] / val_series_count[val]))
     print("\nDataset Summary: \n{} total time series, length = {} hr, sampled {} times".format(series_count, series_size / 60 / 60, num_bins))
     for val in index.unique():
         ct = val_series_count[val]
         print("{} time series ({} %) were added from cluster: {}".format(ct, round(ct / series_count * 100, 1), val))
+        if val_series_count[val]:
+            print("Time series were added from cluster: {} have an average of {} ecents".format(val, avg_event_count[val] / val_series_count[val]))
 
     labels = np.array(labels)
     series_values = np.vstack(series_values)
     series_times = np.vstack(series_times)
 
     # save series values and series times if they don't already exist
-    dir_path = "manatee/rate_values/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)
+    dir_path = "rate_values/kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)
     if not os.path.isfile(dir_path + "/series_values.npy"):
         os.mkdir(dir_path)
         np.save(dir_path + "/series_values.npy", series_values)
@@ -131,14 +212,14 @@ def batch_events_to_rates(data, index, labels_dict = None, series_size = 60*60, 
             np.save(dir_path + "/labels_binary.npy", labels)
     return series_values, series_times, labels, val_series_count
 
-def train_shapelets(X_train, y_train, visualize = False, epochs = 100, length = 0.1, num_shapelet_lengths = 2,
-    num_shapelets = .2, learning_rate = .01, weight_regularizer = .01, series_size = 60 * 60, 
-    num_bins = 60, density = False, p_threshold = 0.5, transfer = False, val_data = None, test_data = None, clf = None):
+def train_shapelets(X_train, y_train, visualize = False, epochs = 10000, length = 0.05, num_shapelet_lengths = 12,
+    num_shapelets = .25, learning_rate = .01, weight_regularizer = .001, batch_size = 256, optimizer = Adam, series_size = 240 * 60, 
+    num_bins = 300, density = True, p_threshold = 0.5, transfer = False, val_data = None):
 
     # shapelet classifier
-    source_dir = 'shapelets'
-    val_split = 1 / 3
-    clf = clf or Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
+    source_dir = 'shapelets_bad'
+    clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer, 
+        batch_size = batch_size, optimizer = optimizer)
 
     # visualize training data
     if visualize:
@@ -161,57 +242,43 @@ def train_shapelets(X_train, y_train, visualize = False, epochs = 100, length = 
                 plt.show()
     
     # split into training and validation sets
-    np.random.seed(0)
-    inds = np.arange(X_train.shape[0])
-    np.random.shuffle(inds)
-    X_train = X_train[inds]
-    y_train = y_train[inds]
-    val_split = int(val_split * X_train.shape[0])
-    X_train, y_train = X_train[:-val_split], y_train[:-val_split]
-    X_val, y_val = (val_data) or (X_train[-val_split:], y_train[-val_split:])
+    if val_data is None:
+        #np.random.seed(0)
+        inds = np.arange(X_train.shape[0])
+        np.random.shuffle(inds)
+        X_train = X_train[inds]
+        y_train = y_train[inds]
+        val_split = 1 / 3
+        val_split = int(val_split * X_train.shape[0])
+        X_train, y_train = X_train[:-val_split], y_train[:-val_split]
+        X_val, y_val = (X_train[-val_split:], y_train[-val_split:])
+    else:
+        X_val, y_val = val_data
 
     # data augmentation
     X_train, y_train = data_augmentation(X_train, y_train)
 
+    # eval shapelet on best fit
+
     # shapelet classifier
     if not transfer:
         print("\nFitting Shapelet Classifier on {} Training Time Series".format(X_train.shape[0]))
-        
-        model = clf.generate_model(60, 2)
-        model.load_weights("checkpoints/shapelets2019-03-08_01-19-31_61-0.4997.h5")
-        clf.encode(y_train)
-        
-        #model = clf.fit(X_train, y_train, source_dir = source_dir, val_data = (X_val, y_val))
-        #print(clf.shapelet_clf.model.summary())
-        #print(model.summary())
+        clf.load_model(num_bins, y_train, "checkpoints/shapelets_bad2019-03-22_19-39-26_45-0.2369.h5")
+        #clf.fit(X_train, y_train, source_dir = source_dir, val_data = (X_val, y_val))
     else:
         print("\nFitting Shapelet Classifer on {} Training Time Series. Transfer Learned from Binary Setting".format(X_train.shape[0]))
-        model = clf.fit_transfer_model(X_train, y_train, "deployed_checkpoints/shapelets2019-03-07_20-41-55_81-0.5743.h5", source_dir = source_dir, val_data = (X_val, y_val))
+        model = clf.fit_transfer_model(X_train, y_train, "checkpoints/shapelets2019-03-08_01-19-31_61-0.4997.h5", source_dir = source_dir, val_data = (X_val, y_val))
         
     # evaluate after full training
-    X_val = TimeSeriesScalerMinMax().fit_transform(X_val)
-    y_pred = model.predict(X_val)
-    #y_pred = clf.predict_proba(X_val)
-    print(y_pred)
+    y_pred = clf.predict_proba(X_val)
     y_preds, conf = clf.decode(y_pred, p_threshold)
     print('\nEvaluation on Randomly Shuffled Validation Set with {} Validation Time Series'.format(X_val.shape[0]))
     #targets = clf.get_classes()
     evaluate(y_val, y_preds)#, target_names=targets)
-    print('Test Eval')
-    X_test = TimeSeriesScalerMinMax().fit_transform(test_data[0])
-
-    y_pred = model.predict(X_test)
-    #y_pred = clf.predict_proba(test_data[0])
-    print(y_pred)
-    y_preds, conf = clf.decode(y_pred, p_threshold)
-    evaluate(test_data[1],y_preds)
-    #return accuracy_score(y_val, y_preds)
+    #return accuracy_score(y_val, y_preds), f1_score(y_val, y_preds, average='macro'), f1_score(y_val, y_preds, average='weighted')
 
     # visualize 
     if visualize:
-        print('Visualize All Shapelets')
-        clf.VisualizeShapelets()
-
         print('Visualize Shapelet Classifications')
         rates = X_train[-val_split:]
         y_true = y_train[-val_split:]
@@ -224,9 +291,9 @@ def train_shapelets(X_train, y_train, visualize = False, epochs = 100, length = 
                 print('Incorrect Classification: True = Non-Anomalous, Predicted = Anomalous')
             elif y_true[i] == 0 and y_preds[i] == 0:
                 print('Correct Classification: Non-Anomalous')
-            clf.VisualizeShapeletLocations(rates, i, series_size, num_bins, density)
+            clf.VisualizeShapeletLocations(rates, i)
 
-        # Shapelet test - track over time
+        """ # Shapelet test - track over time
         track = np.array([])
         for i in range(10):
             track = np.append(track, i * 0.01)
@@ -261,81 +328,429 @@ def train_shapelets(X_train, y_train, visualize = False, epochs = 100, length = 
             print('Classification: Anomalous')
         else:
             print('Classification: Non-Anomalous')
-        clf.VisualizeShapeletLocations(track_end, 0, series_size, num_bins, density)
+        clf.VisualizeShapeletLocations(track_end, 0, series_size, num_bins, density) """
 
     # hyperparameter optimization
 
     # shapelet sizes grid search
 
     # epoch optimization with best HPs and shapelet sizes
-'''        
-def series_size_cv_grid_search(series_values, labels, min = 15 * 60, max = 120*60, step = 15*60, num_bins = 60, 
-    min_points = 1, filter_bandwidth = 1, epochs=100, length=0.1, num_shapelet_lengths=1, learning_rate=.01,
-    weight_regularizer = .01):
+
+def shapelets_hp_opt(length = .05, num_shapelet_lengths = 12, series_size = 240 * 60, n_folds = 3,
+    num_bins = 300, min_points = 5, filter_bandwidth =2, density = True, num_shp = .25, lr = [.001, .01, .1],
+    wr = .001, b = 256, opt = Adam , epochs = 1000, random_state = 0):
+    ''' 
+        grid search over different hyperparameter options (learning rate, weight regularizer, batch size, num_shapelets,
+        optimizer) from Grabocka paper
+
+        num_shapelets = [.05,.1,.15,.2,.25] 
+        learning_rate = [.001, .01, .1],
+        weight_regularizer = [.001,.01, .1], 
+        batch_size = [64, 128, 256, 512], 
+        optimizer = ['Adam', 'Adagrad', 'RMSprop']
+    '''
+    acc = 0
+    f1_macro = 0
+    f1_weighted = 0
+    best_val_acc = None
+    best_val_f1_macro = None
+    best_val_f1_weighted = None
+
+    # load rate values 
+    dir_path = "kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)
+    series_values =  np.load("rate_values/" + dir_path + "/series_values.npy")
+    labels =  np.load("rate_values/" + dir_path + "/labels.npy")
     
-        grid search over different series size values with 5 fold cross validation. graph results
-    
-    n_folds = 5
-    skf = StratifiedKFold(labels, n_folds = n_fods, shuffle = True)
+    # randomly shuffle before splitting into training / test / val
+    np.random.seed(random_state)
+    randomize = np.arange(len(series_values))
+    np.random.shuffle(randomize)
+    series_values = series_values[randomize]
+    labels = labels[randomize]
+    train_split = int(0.9 * series_values.shape[0])
 
-    X_train, y_train, visualize = False, series_size = 60 * 60, 
-    num_bins = 60, density = False, p_threshold = 0.5, transfer = False, val_data = None, clf = None):
+    # write HP combination results to file
+    '''
+    file = open('hp_grid_search_results.txt', 'a+')
+    file.write('%s,%s,%s,%s,%s,%s,%s,%s\n' % ('Num Shapelets', 'Learning Rate', 'Weight Regularizer', 
+        'Optimizer', 'Batch Size', 'Accuracy', 'F1 Macro', 'F1 Weighted'))
+    file.close()
+    '''
+    for value in lr:
 
-    # shapelet classifier
-    clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
-
-    val_acc = []
-    for x in range(min, max, step):
+        # CV
+        skf = StratifiedKFold(n_splits= n_folds, shuffle = True)
         val_acc = []
-        print("Evaluating series size {}".format(x))
-        for i, (train, val) in enumerate(skf):
+        val_f1_macro = []
+        val_fl_weighted = []
+
+        print("Evaluating num_shp: {}, lr: {}, wr: {}, opt: {}, bs: {}".format(num_shp, value, wr, opt, b))
+        for i, (train, val) in enumerate(skf.split(series_values[:train_split], labels[:train_split])):
             print("Running fold {} of {}".format(i+1, n_folds))
-            val_acc.append(train_shapelets(series_values[train].reshape(-1, series_values.shape[1], 1), labels[y_train],
-                series_size = x, num_bins = num_bins, min_points = min_points, filter_bandwidth = filter_bandwidth,
-                )
-'''
+            acc_val, f1_macro_val, f1_weighted_val = train_shapelets(series_values[train].reshape(-1, series_values.shape[1], 1), labels[train],
+                series_size = series_size, num_bins = num_bins, density=density, length = length, num_shapelet_lengths=num_shapelet_lengths,
+                val_data=(series_values[val].reshape(-1, series_values.shape[1], 1), labels[val]), learning_rate = value, 
+                weight_regularizer = wr, num_shapelets = num_shp, optimizer = opt, batch_size = b, epochs=epochs)
+            val_acc.append(acc_val)
+            val_f1_macro.append(f1_macro_val)
+            val_fl_weighted.append(f1_weighted_val)
+
+        # write mean values
+        file = open('hp_grid_search_results.txt', 'a+')
+        file.write('%s,%s,%s,%s,%s,%s,%s,%s\n' % (num_shp, value, wr, opt, b, np.mean(val_acc),
+            np.mean(val_f1_macro), np.mean(val_fl_weighted)))
+        file.close()
+        if np.mean(val_acc) > acc:
+            best_val_acc = value
+            acc = np.mean(val_acc)
+        if np.mean(val_f1_macro) > f1_macro:
+            best_val_f1_macro = value
+            f1_macro = np.mean(val_f1_macro)
+        if np.mean(val_fl_weighted) > f1_weighted:
+            best_val_f1_weighted = value
+            f1_weighted = np.mean(val_fl_weighted)
+
+    # return best result
+    print("The best accuracy was {} at value {}".format(acc, best_val_acc))
+    print("The best f1 macro was {} at value {}".format(f1_macro, best_val_f1_macro))
+    print("The best f1 weighted was {} at value {}".format(f1_weighted, best_val_f1_weighted))
+
+def series_size_cv_grid_search(event_times, index, n_folds =5, min = 15 * 60, max = 120*60, step = 15*60, num_bins = 60, 
+    min_points = 10, filter_bandwidth = 1, density = True, epochs=100, length=0.1, num_shapelet_lengths=2, 
+    num_shapelets = .2, learning_rate=.01, weight_regularizer = .01):
+    '''
+        grid search over different series size values with 5 fold cross validation. graph results
+
+        30 minute series size provides best accuracy, f1, support across classes
+    '''
+    # shapelet classifier
+    #clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
+
+    acc = []
+    f1_macro = []
+    f1_weighted = []
+    for x in range(min, max, step):
+
+        # create rate values if they don't already exist
+        if os.path.isfile("rate_values/kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}/series_values.npy".format(x / 60 / 60, num_bins, min_points, filter_bandwidth, density)):
+            dir_path = "kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(x / 60 / 60, num_bins, min_points, filter_bandwidth, density)
+            series_values =  np.load("rate_values/" + dir_path + "/series_values.npy")
+            labels =  np.load("rate_values/" + dir_path + "/labels.npy")
+        else:
+            labels_dict = {}
+            for val in index.unique():
+                if val < 50:
+                    labels_dict[val] = 0
+                else:
+                    labels_dict[val] = 1
+            series_values, _, labels, _ = \
+                batch_events_to_rates(event_times, index, labels_dict, series_size = x, min_points = min_points, 
+                    num_bins = num_bins, filter_bandwidth = filter_bandwidth, density = density)
+
+        skf = StratifiedKFold(n_splits= n_folds, shuffle = True)
+        val_acc = []
+        val_f1_macro = []
+        val_fl_weighted = []
+
+        # randomly shuffle before splitting into training / test / val
+        np.random.seed(0)
+        randomize = np.arange(len(series_values))
+        np.random.shuffle(randomize)
+        series_values = series_values[randomize]
+        labels = labels[randomize]
+
+        # train
+        train_split = int(0.9 * series_values.shape[0])
+
+        print("Evaluating series size {}".format(x))
+        for i, (train, val) in enumerate(skf.split(series_values[:train_split], labels[:train_split])):
+            print("Running fold {} of {}".format(i+1, n_folds))
+            acc_val, f1_macro_val, f1_weighted_val = train_shapelets(series_values[train].reshape(-1, series_values.shape[1], 1), labels[train],
+                series_size = x, num_bins = num_bins, density=density,
+                val_data=(series_values[val].reshape(-1, series_values.shape[1], 1), labels[val]))
+            val_acc.append(acc_val)
+            val_f1_macro.append(f1_macro_val)
+            val_fl_weighted.append(f1_weighted_val)
+        acc.append(np.mean(val_acc))
+        f1_macro.append(np.mean(val_f1_macro))
+        f1_weighted.append(np.mean(val_fl_weighted))
+    
+    # graph results
+    names = ['Accuracy', 'F1 Macro', 'F1 Weighted']
+    for vals, name in zip([acc, f1_macro, f1_weighted], names):
+        plt.clf()
+        plt.plot(range(min, max, step), vals)
+        plt.title(name)
+        plt.xlabel('Series Size')
+        plt.ylabel(name)
+        plt.show()
+
+    # return best result
+    x_vals = np.arange(min, max, step)
+    print("The best accuracy was {} at series size {}".format(np.amax(acc), x_vals[np.argmax(acc)]))
+    print("The best f1 macro was {} at series size {}".format(np.amax(f1_macro), x_vals[np.argmax(f1_macro)]))
+    print("The best f1 weighted was {} at series size {}".format(np.amax(f1_weighted), x_vals[np.argmax(f1_weighted)]))
+    return np.amax(acc), np.amax(f1_macro), np.amax(f1_weighted)
+
+def num_bins_cv_grid_search(event_times, index, n_folds =5, min = 15, max = 61, step = 15, series_size = 30 * 60, 
+    min_points = 10, filter_bandwidth = 1, density = True, epochs=100, length=0.1, num_shapelet_lengths=2, 
+    num_shapelets = .2, learning_rate=.01, weight_regularizer = .01):
+    '''
+        grid search over different series size values with 5 fold cross validation. graph results
+
+        135 bins provides best accuracy, f1, support across classes
+    '''
+    # shapelet classifier
+    #clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
+
+    acc = []
+    f1_macro = []
+    f1_weighted = []
+    for x in range(min, max, step):
+
+        # create rate values if they don't already exist
+        if os.path.isfile("rate_values/kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}/series_values.npy".format(series_size / 60 / 60, x, min_points, filter_bandwidth, density)):
+            dir_path = "kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, x, min_points, filter_bandwidth, density)
+            series_values =  np.load("rate_values/" + dir_path + "/series_values.npy")
+            labels =  np.load("rate_values/" + dir_path + "/labels.npy")
+        else:
+            labels_dict = {}
+            for val in index.unique():
+                if val < 50:
+                    labels_dict[val] = 0
+                else:
+                    labels_dict[val] = 1
+            series_values, _, labels, _ = \
+                batch_events_to_rates(event_times, index, labels_dict, series_size = series_size, min_points = min_points, 
+                    num_bins = x, filter_bandwidth = filter_bandwidth, density = density)
+
+        skf = StratifiedKFold(n_splits= n_folds, shuffle = True)
+        val_acc = []
+        val_f1_macro = []
+        val_fl_weighted = []
+
+        # randomly shuffle before splitting into training / test / val
+        np.random.seed(0)
+        randomize = np.arange(len(series_values))
+        np.random.shuffle(randomize)
+        series_values = series_values[randomize]
+        labels = labels[randomize]
+
+        # train
+        train_split = int(0.9 * series_values.shape[0])
+
+        print("Evaluating number of bins {}".format(x))
+        for i, (train, val) in enumerate(skf.split(series_values[:train_split], labels[:train_split])):
+            print("Running fold {} of {}".format(i+1, n_folds))
+            acc_val, f1_macro_val, f1_weighted_val = train_shapelets(series_values[train].reshape(-1, series_values.shape[1], 1), labels[train],
+                series_size = series_size, num_bins = x, density=density,
+                val_data=(series_values[val].reshape(-1, series_values.shape[1], 1), labels[val]))
+            val_acc.append(acc_val)
+            val_f1_macro.append(f1_macro_val)
+            val_fl_weighted.append(f1_weighted_val)
+        acc.append(np.mean(val_acc))
+        f1_macro.append(np.mean(val_f1_macro))
+        f1_weighted.append(np.mean(val_fl_weighted))
+    
+    # graph results
+    names = ['Accuracy', 'F1 Macro', 'F1 Weighted']
+    for vals, name in zip([acc, f1_macro, f1_weighted], names):
+        plt.clf()
+        plt.plot(range(min, max, step), vals)
+        plt.title(name)
+        plt.xlabel('Number of Bins')
+        plt.ylabel(name)
+        plt.show()
+
+    # return best result
+    x_vals = np.arange(min, max, step)
+    print("The best accuracy was {} at number of bins {}".format(np.amax(acc), x_vals[np.argmax(acc)]))
+    print("The best f1 macro was {} at number of bins {}".format(np.amax(f1_macro), x_vals[np.argmax(f1_macro)]))
+    print("The best f1 weighted was {} at number of bins {}".format(np.amax(f1_weighted), x_vals[np.argmax(f1_weighted)]))
+    return np.amax(acc), np.amax(f1_macro), np.amax(f1_weighted)
+
+def filter_width_cv_grid_search(event_times, index, n_folds =5, min = 1, max = 5, step = 1, series_size = 30 * 60, 
+    min_points = 10, num_bins = 135, density = True, epochs=100, length=0.1, num_shapelet_lengths=2, 
+    num_shapelets = .2, learning_rate=.01, weight_regularizer = .01):
+    '''
+        grid search over different series size values with 5 fold cross validation. graph results
+
+        width = 1 provides best accuracy, f1, support across classes
+    '''
+    # shapelet classifier
+    #clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
+
+    acc = []
+    f1_macro = []
+    f1_weighted = []
+    for x in range(min, max, step):
+
+        # create rate values if they don't already exist
+        if os.path.isfile("rate_values/kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}/series_values.npy".format(series_size / 60 / 60, num_bins, min_points, x, density)):
+            dir_path = "kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, x, density)
+            series_values =  np.load("rate_values/" + dir_path + "/series_values.npy")
+            labels =  np.load("rate_values/" + dir_path + "/labels.npy")
+        else:
+            labels_dict = {}
+            for val in index.unique():
+                if val < 50:
+                    labels_dict[val] = 0
+                else:
+                    labels_dict[val] = 1
+            series_values, _, labels, _ = \
+                batch_events_to_rates(event_times, index, labels_dict, series_size = series_size, min_points = min_points, 
+                    num_bins = num_bins, filter_bandwidth = x, density = density)
+
+        skf = StratifiedKFold(n_splits= n_folds, shuffle = True)
+        val_acc = []
+        val_f1_macro = []
+        val_fl_weighted = []
+
+        # randomly shuffle before splitting into training / test / val
+        np.random.seed(0)
+        randomize = np.arange(len(series_values))
+        np.random.shuffle(randomize)
+        series_values = series_values[randomize]
+        labels = labels[randomize]
+
+        # train
+        train_split = int(0.9 * series_values.shape[0])
+
+        print("Evaluating filter bandwidth {}".format(x))
+        for i, (train, val) in enumerate(skf.split(series_values[:train_split], labels[:train_split])):
+            print("Running fold {} of {}".format(i+1, n_folds))
+            acc_val, f1_macro_val, f1_weighted_val = train_shapelets(series_values[train].reshape(-1, series_values.shape[1], 1), labels[train],
+                series_size = series_size, num_bins = num_bins, density=density,
+                val_data=(series_values[val].reshape(-1, series_values.shape[1], 1), labels[val]))
+            val_acc.append(acc_val)
+            val_f1_macro.append(f1_macro_val)
+            val_fl_weighted.append(f1_weighted_val)
+        acc.append(np.mean(val_acc))
+        f1_macro.append(np.mean(val_f1_macro))
+        f1_weighted.append(np.mean(val_fl_weighted))
+    
+    # graph results
+    names = ['Accuracy', 'F1 Macro', 'F1 Weighted']
+    for vals, name in zip([acc, f1_macro, f1_weighted], names):
+        plt.clf()
+        plt.plot(range(min, max, step), vals)
+        plt.title(name)
+        plt.xlabel('Filter Bandwidth')
+        plt.ylabel(name)
+        plt.show()
+
+    # return best result
+    x_vals = np.arange(min, max, step)
+    print("The best accuracy was {} at filter bandwidth {}".format(np.amax(acc), x_vals[np.argmax(acc)]))
+    print("The best f1 macro was {} at filter bandwidth {}".format(np.amax(f1_macro), x_vals[np.argmax(f1_macro)]))
+    print("The best f1 weighted was {} at filter bandwidth {}".format(np.amax(f1_weighted), x_vals[np.argmax(f1_weighted)]))
+    return np.amax(acc), np.amax(f1_macro), np.amax(f1_weighted)
+
+def min_points_cv_grid_search(event_times, index, n_folds =5, min = 5, max = 26, step = 5, series_size = 30 * 60, 
+    filter_bandwidth = 1, num_bins = 135, density = True, epochs=100, length=0.1, num_shapelet_lengths=2, 
+    num_shapelets = .2, learning_rate=.01, weight_regularizer = .01):
+    '''
+        grid search over different series size values with 5 fold cross validation. graph results
+
+        5 bins (10 bins might be more faithful representation) provides best accuracy, f1, support across classes
+    '''
+    # shapelet classifier
+    #clf = Shapelets(epochs, length, num_shapelet_lengths, num_shapelets, learning_rate, weight_regularizer)
+
+    acc = []
+    f1_macro = []
+    f1_weighted = []
+    for x in range(min, max, step):
+
+        # create rate values if they don't already exist
+        if os.path.isfile("rate_values/kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}/series_values.npy".format(series_size / 60 / 60, num_bins, x, filter_bandwidth, density)):
+            dir_path = "kmeans/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, x, filter_bandwidth, density)
+            series_values =  np.load("rate_values/" + dir_path + "/series_values.npy")
+            labels =  np.load("rate_values/" + dir_path + "/labels.npy")
+        else:
+            labels_dict = {}
+            for val in index.unique():
+                if val < 50:
+                    labels_dict[val] = 0
+                else:
+                    labels_dict[val] = 1
+            series_values, _, labels, _ = \
+                batch_events_to_rates(event_times, index, labels_dict, series_size = series_size, min_points = x, 
+                    num_bins = num_bins, filter_bandwidth = filter_bandwidth, density = density)
+
+        skf = StratifiedKFold(n_splits= n_folds, shuffle = True)
+        val_acc = []
+        val_f1_macro = []
+        val_fl_weighted = []
+
+        # randomly shuffle before splitting into training / test / val
+        np.random.seed(0)
+        randomize = np.arange(len(series_values))
+        np.random.shuffle(randomize)
+        series_values = series_values[randomize]
+        labels = labels[randomize]
+
+        # train
+        train_split = int(0.9 * series_values.shape[0])
+
+        print("Evaluating minimum number of points {}".format(x))
+        for i, (train, val) in enumerate(skf.split(series_values[:train_split], labels[:train_split])):
+            print("Running fold {} of {}".format(i+1, n_folds))
+            acc_val, f1_macro_val, f1_weighted_val = train_shapelets(series_values[train].reshape(-1, series_values.shape[1], 1), labels[train],
+                series_size = series_size, num_bins = num_bins, density=density,
+                val_data=(series_values[val].reshape(-1, series_values.shape[1], 1), labels[val]))
+            val_acc.append(acc_val)
+            val_f1_macro.append(f1_macro_val)
+            val_fl_weighted.append(f1_weighted_val)
+        acc.append(np.mean(val_acc))
+        f1_macro.append(np.mean(val_f1_macro))
+        f1_weighted.append(np.mean(val_fl_weighted))
+    
+    # graph results
+    names = ['Accuracy', 'F1 Macro', 'F1 Weighted']
+    for vals, name in zip([acc, f1_macro, f1_weighted], names):
+        plt.clf()
+        plt.plot(range(min, max, step), vals)
+        plt.title(name)
+        plt.xlabel('Min Points')
+        plt.ylabel(name)
+        plt.show()
+
+    # return best result
+    x_vals = np.arange(min, max, step)
+    print("The best accuracy was {} at minimum number of points {}".format(np.amax(acc), x_vals[np.argmax(acc)]))
+    print("The best f1 macro was {} at minimum number of points {}".format(np.amax(f1_macro), x_vals[np.argmax(f1_macro)]))
+    print("The best f1 weighted was {} at minimum number of points {}".format(np.amax(f1_weighted), x_vals[np.argmax(f1_weighted)]))
+    return np.amax(acc), np.amax(f1_macro), np.amax(f1_weighted)
 
 # main method for training methods
 if __name__ == '__main__':
-    series_size = 60 * 60
-    num_bins = 60
-    min_points = 10
-    filter_bandwidth = 1
+    series_size = 240 * 60
+    num_bins = 300
+    min_points = 5
+    filter_bandwidth = 2
     density = True
-    data = pd.read_pickle('../../all_emails_clustered.pkl')
-    data = parse_weekly_timestamps(data)        # add weekly timestamps
-    index = data['file']
+    data = pd.read_pickle('../../all_emails_kmeans_clustered.pkl')
+    data = parse_weekly_timestamps(data)    
 
-    if os.path.isfile("rate_values/sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}/series_values.npy".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)):
-        dir_path = "sz_{}_hr_bins_{}_min_pts_{}_filter_width_{}_density_{}".format(series_size / 60 / 60, num_bins, min_points, filter_bandwidth, density)
-        series_values =  np.load("rate_values/" + dir_path + "/series_values.npy")
-        labels =  np.load("rate_values/" + dir_path + "/labels.npy")
-        pkl_file = open("rate_values/" + dir_path + "/val_series_count.pkl", 'rb')
-        val_series_count = pickle.load(pkl_file)
-        pkl_file.close()
-        series_count = 0
-        for val in index.unique():
-            series_count += val_series_count[val]
-        print("\nDataset Summary: {} total time series, length = {} hr, sampled {} times\n".format(series_count, series_size / 60 / 60, num_bins))  
-        for val in index.unique():
-            ct = val_series_count[val]
-            print("{} time series ({} % of total) were added from cluster: {}".format(ct, round(ct / series_count * 100, 1), val))
-    else:
-        
-        labels_dict = {}
-        for val in data['file'].unique():
-            if val == 'enron.jsonl':
-                labels_dict[val] = 0
-            else:
-                labels_dict[val] = 1
-        ## TODO - BATCH EVENTS TO RATES hp optimization / fidelity - series_size, num_bins, min_points, filter_bandwidth
-
-        # train multiclass shapelet classifier without transfer learning
-        series_values, series_times, labels, val_series_count = \
-            batch_events_to_rates(data['Weekly Timestamp'], index, labels_dict, series_size = series_size, min_points = min_points, 
-                num_bins = num_bins, filter_bandwidth = filter_bandwidth, density = density)
-
-    train_split = int(0.9 * series_values.shape[0])
-    train_shapelets(series_values[:train_split].reshape(-1, series_values.shape[1], 1), labels[:train_split], 
-                    visualize=True, series_size = series_size, num_bins = num_bins, density=density)
+    # 5 fold CV on series size
+    '''
+    num_bins_cv_grid_search(data['Weekly Timestamp'], data['kmeans'], min = 300, max = 421, step = 30, 
+        series_size=series_size, min_points=min_points, filter_bandwidth=filter_bandwidth, density=density)
     
+    shapelet_sizes_grid_search(series_size=series_size, filter_bandwidth=filter_bandwidth, 
+       num_bins=num_bins, density=density, min_points=min_points)
+    '''
+    shapelets_hp_opt()
+    '''
+    # EDA events / series
+    
+    labels_dict = {}
+    for val in data['file'].unique():
+        if val == 'enron.jsonl':
+            labels_dict[val] = 0
+        else:
+            labels_dict[val] = 1
+    batch_events_to_rates(data['Weekly Timestamp'], data['file'], labels_dict, series_size = series_size, min_points = min_points, 
+        num_bins = num_bins, filter_bandwidth = filter_bandwidth, density = density)
+    '''
