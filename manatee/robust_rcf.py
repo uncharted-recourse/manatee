@@ -187,7 +187,6 @@ class robust_rcf():
         # calculate streaming anomaly scores
         avg_codisp = pd.Series(0.0, index=np.arange(self.num_points, self.num_points + points.shape[0]))
         initial_index = self.num_points
-        print(initial_index)
         for index, point in enumerate(points_gen):
             index += initial_index
             for tree in self.forest:
