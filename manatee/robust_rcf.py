@@ -11,7 +11,7 @@ Python implementation from https://github.com/kLabUM/rrcf
 import numpy as np 
 import pandas as pd
 import rrcf as rrcf_base
-from evaluate import evaluate
+#from evaluate import evaluate
 import matplotlib.pyplot as plt
 from tslearn.preprocessing import TimeSeriesScalerMinMax, TimeSeriesScalerMeanVariance
 
