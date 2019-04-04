@@ -11,7 +11,6 @@ import pandas as pd
 import numpy as np
 import configparser
 
-from keras import backend as K
 from keras.layers import Conv1D, BatchNormalization, GlobalAveragePooling1D, Permute, Dropout
 from keras.layers import Input, Dense, concatenate, Activation
 from keras.models import Model
@@ -73,13 +72,9 @@ class NKFCNLSTMClassifier(grapevine_pb2_grpc.ClassifierServicer):
         self.NUM_BINS = 300
         self.FILTER_BANDWIDTH = 2
 
-        # release GPU memory
-        K.clear_session()
 
         # instantiate FCN-LSTM clf and model object using deployed weights
         self.model = generate_alstmfcn(int(self.NUM_BINS), len(CATEGORIES.split(',')))
-        self.model.compile(optimizer=Adam(lr=1e-3), loss='categorical_crossentropy', metrics=['accuracy'])
-        print(self.model.summary())
         self.model.load_weights("deployed_checkpoints/" + MODEL_OBJECT)
         print("Weights loaded from deployed_checkpoints/" + MODEL_OBJECT)
         self.le = LabelEncoder().fit(CATEGORIES.split(','))
