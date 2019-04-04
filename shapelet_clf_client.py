@@ -35,8 +35,8 @@ def run():
         classification = stub.Classify(testMessage)
         print('Classifier returned this classification for email {} of {} HAM example (class / confidence): {} / {}'.format(i + 1, n, classification.prediction, classification.confidence))
     
-    # add spike of 1000 emails (1 / second) - hopefully these time series will be classified as SPAM
-    n=1000
+    # add spike of 100 emails (1 / second) - hopefully these time series will be classified as SPAM
+    n=100
     for i in range(n):
         timestamp += 1
         testMessage = grapevine_pb2.Message(
