@@ -34,19 +34,11 @@ RUN curl -O https://bootstrap.pypa.io/get-pip.py && \
 # Set up our notebook config.
 COPY . ./clusterfiles
 
-RUN pip3 install numpy \
-        && \
-    pip3 install Cython \
-        && \
-    pip3 --no-cache-dir install -r ./clusterfiles/requirements.txt \
-        && \
-    python3 -m ipykernel.kernelspec \
-        && \
-    pip3 install click
+RUN pip3 --no-cache-dir install -r ./clusterfiles/requirements.txt \
    
 # matplotlib config (used by benchmark)
-RUN mkdir -p /root/.config/matplotlib
-RUN echo "backend : Agg" > /root/.config/matplotlib/matplotlibrc
+#RUN mkdir -p /root/.config/matplotlib
+#RUN echo "backend : Agg" > /root/.config/matplotlib/matplotlibrc
 
 # --- DO NOT EDIT OR DELETE BETWEEN THE LINES --- #
 # These lines will be edited automatically by parameterized_docker_build.sh. #
@@ -63,10 +55,8 @@ RUN echo "backend : Agg" > /root/.config/matplotlib/matplotlibrc
 
 RUN ls /opt #find / -name "libmsodbcsql*"
 
-
-
 # For CUDA profiling, TensorFlow requires CUPTI.
-ENV LD_LIBRARY_PATH /usr/local/cuda/extras/CUPTI/lib64:$LD_LIBRARY_PATH
+#ENV LD_LIBRARY_PATH /usr/local/cuda/extras/CUPTI/lib64:$LD_LIBRARY_PATH
 
 WORKDIR ./clusterfiles
 
