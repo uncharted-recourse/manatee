@@ -109,3 +109,5 @@ data/
 logs/
 #unencoded_chars.json
 saved_checkpoints/
+.vscode/*
+
