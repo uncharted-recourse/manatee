@@ -14,11 +14,11 @@ The model comes from this paper: https://www.ismll.uni-hildesheim.de/pub/pdfs/gr
 
 This classifier connects an attention-based LSTM layer to multiple convolution and batch normalization layer sequences. The model originally comes from this paper: https://arxiv.org/abs/1801.04503 (Karim et al. 2018) and is implemented in this github repository: https://github.com/titu1994/LSTM-FCN. New Knowledge's slighty edited implementation is avaiable here: https://github.com/NewKnowledge/LSTM-FCN.
 
-### Training Data for Spam Classification Problem
+## Training Data for Spam Classification Problem
 
 The data used for the spam classification problem consisted of the 419 Nigerian prince dataset (spam), the Enron dataset (ham), and a private dataset of attack emails from the NASA Jet Propulsion Laboratory (JPL). 
 
-### gRPC Dockerized Classifiers for Deployment
+## gRPC Dockerized Classifiers for Deployment
 
 The folders **NK_Shapelet_Classifier** and **NK_FCN_LSTM_Classifier** each contain gRPC interfaces with the following components:
 
