@@ -76,6 +76,7 @@ class NKFCNLSTMClassifier(grapevine_pb2_grpc.ClassifierServicer):
         # instantiate FCN-LSTM clf and model object using deployed weights
         self.model = generate_alstmfcn(int(self.NUM_BINS), len(CATEGORIES.split(',')))
         self.model.load_weights("deployed_checkpoints/" + MODEL_OBJECT)
+        self.model._make_predict_function()
         print("Weights loaded from deployed_checkpoints/" + MODEL_OBJECT)
         self.le = LabelEncoder().fit(CATEGORIES.split(','))
 
@@ -120,8 +121,6 @@ class NKFCNLSTMClassifier(grapevine_pb2_grpc.ClassifierServicer):
         max_time = min(self.series) + self.SERIES_LENGTH
         series_values, _ = events_to_rates(self.series, filter_bandwidth = self.FILTER_BANDWIDTH, max_time = max_time, min_time = min(self.series), num_bins = self.NUM_BINS, density = True)
         series_values = series_values.reshape((1, 1, len(series_values)))
-
-        print(series_values.shape)
 
         preds = self.model.predict(series_values)
         y_probs = [p / np.sum(preds) for p in preds]
