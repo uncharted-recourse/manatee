@@ -209,24 +209,25 @@ class robust_rcf():
 # main method for testing class
 if __name__ == '__main__':
 
-    ''' Preprocessing '''
+    #Preprocessing
     # load Twitter hashtag data
     npzfile = np.load("/Users/jeffreygleason 1/Desktop/NewKnowledge/Code/time-series/tapir/tapir/data/prep/hashtags_2019_01_01_to_2019_02_01.npz")
     hashtags = npzfile['rate_vals']
     ht = 0
-
+    '''
     # mark top 5% of rate values as anomalous
     anom_thresh = 95
     anom = hashtags[ht] > np.percentile(hashtags[ht], anom_thresh)
 
-    ''' Instantiate RRCF'''
+     Instantiate RRCF
+    '''
     # set HPs and instantiate
     num_trees = 5
     tree_size = 10
-
-    clf = robust_rcf(num_trees, tree_size)
     
-    '''Test Different Methods'''
+    clf = robust_rcf(num_trees, tree_size)
+    ''' 
+    Test Different Methods
     # test batch anomaly detection
     clf.fit_batch(hashtags[ht].reshape(-1,1))
     anom_score = clf.batch_anomaly_scores()
@@ -242,8 +243,10 @@ if __name__ == '__main__':
     print(evaluate(anom, anom_pred)) 
 
     # plot comparison of labeled anomalies to predicted anomalies
+    '''
     colors = ('blue', 'red')
     targets = ('non-anomalous', 'anomalous')
+    '''
     #indices = (np.where(~anom), np.where(anom))
     #data = (hashtags[ht][~anom], hashtags[ht][anom])
     pred_indices = (np.where(~anom_pred), np.where(anom_pred))
@@ -257,28 +260,29 @@ if __name__ == '__main__':
         plt.scatter(index, dat, c = color, label = target, s=10)
     plt.legend()
     plt.show()
+    '''
 
     # test streaming anomaly detection
     window_size = 1
     anom_score = clf.stream_anomaly_scores(hashtags[ht], window_size, new_forest=True)
-    print(anom_score)
+    #print(anom_score)
     # mark top 5% of predictions as anomalous
     anom_pred = anom_score > np.percentile(anom_score, anom_thresh)
 
     # print evaluation
-    print(evaluate(anom, anom_pred)) 
+    #print(evaluate(anom, anom_pred)) 
     
     # plot comparison of labeled anomalies to predicted anomalies
     pred_indices = (np.where(~anom_pred), np.where(anom_pred))
     pred_data = (hashtags[ht][~anom_pred], hashtags[ht][anom_pred])
-    plt.subplot(2,1,2)
+    #plt.subplot(2,1,2)
     for index, dat, color, target in zip(pred_indices, pred_data, colors, targets):
         plt.scatter(index, dat, c = color, label = target, s=10)
     plt.legend()
     plt.show()
     
     ## Test streaming anomaly detection from created tree
-    print(clf.stream_anomaly_scores(hashtags[ht], window_size))
+    #print(clf.stream_anomaly_scores(hashtags[ht], window_size))
 
 
 
