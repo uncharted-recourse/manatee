@@ -36,6 +36,8 @@ COPY . ./clusterfiles
 
 RUN pip3 install numpy \
         && \
+    pip3 install Cython \
+        && \
     pip3 --no-cache-dir install -r ./clusterfiles/requirements.txt 
    
 # matplotlib config (used by benchmark)
