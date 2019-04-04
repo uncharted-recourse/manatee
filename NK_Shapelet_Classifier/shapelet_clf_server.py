@@ -49,7 +49,7 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
         self.clf = Shapelets(self.EPOCHS, self.LENGTH, self.NUM_SHAPELET_LENGTHS, self.NUM_SHAPELETS, self.LEARNING_RATE, self.WEIGHT_REGULARIZER)
         self.model = self.clf.generate_model(int(self.NUM_BINS), len(CATEGORIES.split(',')))
         print('Load weights...')
-        self.model.load_weights("../deployed_checkpoints/" + MODEL_OBJECT)
+        self.model.load_weights("deployed_checkpoints/" + MODEL_OBJECT)
         self.model._make_predict_function()
         print('Weights loaded...')
         self.clf.encode(CATEGORIES.split(','))
