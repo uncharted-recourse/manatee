@@ -10,7 +10,6 @@ import time
 import pandas as pd
 import numpy as np
 import configparser
-import tensorflow as tf
 
 from Sloth.classify import Shapelets
 from Sloth.preprocess import events_to_rates
@@ -21,13 +20,11 @@ import logging
 import grapevine_pb2
 import grapevine_pb2_grpc
 from concurrent import futures
-import matplotlib.pyplot as plt
 
 # GLOBALS
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
 
 DEBUG = True # boolean to specify whether or not print DEBUG information
-
 #-----
 class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
 
