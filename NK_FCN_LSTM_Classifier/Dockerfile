@@ -34,7 +34,9 @@ RUN curl -O https://bootstrap.pypa.io/get-pip.py && \
 # Set up our notebook config.
 COPY . ./clusterfiles
 
-RUN pip3 --no-cache-dir install -r ./clusterfiles/requirements.txt 
+RUN pip3 install numpy \
+        && \
+    pip3 --no-cache-dir install -r ./clusterfiles/requirements.txt 
    
 # matplotlib config (used by benchmark)
 #RUN mkdir -p /root/.config/matplotlib
