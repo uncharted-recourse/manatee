@@ -2,7 +2,7 @@
 
 The acronym manatee stands for **M**ethods for **A**nomaly **N**otification **A**gainst **T**im**E**-series **E**vidence
 
-This directory presents two methods for time series classification:
+This repository contains two methods for time series classification and one method for streaming anomaly detection:
 
 ## 1. Shapelet Classifier
 
@@ -12,7 +12,12 @@ The model comes from this paper: https://www.ismll.uni-hildesheim.de/pub/pdfs/gr
 
 ## 2. FCN-LSTM Classifier
 
-This classifier connects an attention-based LSTM layer to multiple convolution and batch normalization layer sequences. The model originally comes from this paper: https://arxiv.org/abs/1801.04503 (Karim et al. 2018) and is implemented in this github repository: https://github.com/titu1994/LSTM-FCN. New Knowledge's slighty edited implementation is avaiable here: https://github.com/NewKnowledge/LSTM-FCN.
+This classifier connects an attention-based LSTM layer to multiple convolution and batch normalization layer sequences. The model originally comes from this paper: https://arxiv.org/abs/1801.04503 (Karim et al. 2018) and is implemented in this public repository: https://github.com/titu1994/LSTM-FCN. New Knowledge's slighty edited implementation is avaiable here: https://github.com/NewKnowledge/LSTM-FCN.
+
+## 3. Robust Random Cut Forest for Streaming Anomaly Detection
+
+This method produces an anomaly score for a new observation according to the expected change in complexity (averaged across all trees in the forest) that results from attempting to insert the new observation into each tree. This complexity is inversely proportional to the depth of the inserted observation (observations closer to the root = more anomalous). The method was proposed by this paper: http://proceedings.mlr.press/v48/guha16.pdf and is implemented in this public repository: https://github.com/kLabUM/rrcf. New Knowledge's edited implementation is available here: https://github.com/NewKnowledge/rrcf. 
+
 
 ## Training Data for Spam Classification Problem
 
