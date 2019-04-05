@@ -125,7 +125,7 @@ class NKFCNLSTMClassifier(grapevine_pb2_grpc.ClassifierServicer):
         preds = self.model.predict(series_values)
         y_probs = [p / np.sum(preds) for p in preds]
         result.confidence = y_probs[0][0] if y_probs[0][0] > P_THRESHOLD else 1 - y_probs[0][0]
-        result.prediction = self.le.inverse_transform(np.array(np.argmax(preds)))
+        result.prediction = self.le.inverse_transform([np.argmax(preds)])
         print("Classification result is (class / confidence): {} / {}".format(result.prediction, result.confidence))
 
         elapsed_time = time.time()-start_time
