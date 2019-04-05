@@ -1,0 +1,2 @@
+1. shapelets2019-03-04_21-45-06_99-0.5900.h5 - bianry classifier ->
+['friend', 'foe']

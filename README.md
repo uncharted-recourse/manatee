@@ -1,37 +1,41 @@
-# New Knowledge's Shapelet Time Series Classifier
+# New Knowledge's Time Series Classification Methods
 
 The acronym manatee stands for **M**ethods for **A**nomaly **N**otification **A**gainst **T**im**E**-series **E**vidence
 
-Assumptions in data labeling:
+This repository contains two methods for time series classification and one method for streaming anomaly detection:
 
-1. 419 emails are labeled as spam
+## 1. Shapelet Classifier
 
-2. enron emails are labeled as not spam
+This classifier learns a dictionary of "shapelets," or discriminative subsequences, from the training data (the solutions are not unique). The closest distance between each shapelet and a time series defines a new feature representation, known as the shapelet-transformation. 
 
-3. All JPL data abuse dataset emails are treated as foe - exceptions are FalsePositive and Recon which were dropped (former due to self-explanatory reason, and latter due to "lack of full understanding" reasons). Unknown was dropped as well.
+The model comes from this paper: https://www.ismll.uni-hildesheim.de/pub/pdfs/grabocka2014e-kdd.pdf (Grabocka et al. 2014) and is based off of this open-source library: https://tslearn.readthedocs.io/en/latest/gen_modules/tslearn.shapelets.html. New Knowledge's implementation of the shapelet classifier, which draws heavily from the previous library is available here: https://github.com/NewKnowledge/sloth/blob/master/Sloth/classify.py.
 
-Built on top of the shapelet convolutional neural network time series classification model:
+## 2. FCN-LSTM Classifier
 
-https://github.com/NewKnowledge/sloth/blob/master/Sloth/classify.py
+This classifier connects an attention-based LSTM layer to multiple convolution and batch normalization layer sequences. The model originally comes from this paper: https://arxiv.org/abs/1801.04503 (Karim et al. 2018) and is implemented in this public repository: https://github.com/titu1994/LSTM-FCN. New Knowledge's slighty edited implementation is avaiable here: https://github.com/NewKnowledge/LSTM-FCN.
 
-# Switching Binary and Multiclass Classifiers
+## 3. Robust Random Cut Forest for Streaming Anomaly Detection
 
-You can swap out the multiclass multilabel model for the binary model (enabled by default) by modifying `config.ini` as specified in `deployed_checkpoints/checkpoint_descriptions.txt`
+This method produces an anomaly score for a new observation according to the expected change in complexity (averaged across all trees in the forest) that results from attempting to insert the new observation into each tree. This complexity is inversely proportional to the depth of the inserted observation (observations closer to the root = more anomalous). The method was proposed by this paper: http://proceedings.mlr.press/v48/guha16.pdf and is implemented in this public repository: https://github.com/kLabUM/rrcf. New Knowledge's edited implementation is available here: https://github.com/NewKnowledge/rrcf. 
 
-Be sure to rebuild docker images, if using dockerized version of code, after making this edit.
 
-# gRPC Dockerized Classifier
+## Training Data for Spam Classification Problem
 
-The gRPC interface consists of the following components:
-*) `grapevine.proto` in `protos/` which generates `grapevine_pb2.py` and `grapevine_pb2_grpc.py` according to instructions in `protos/README.md` -- these have to be generated every time `grapevine.proto` is changed
-*) `shapelet_clf_server.py` which is the main gRPC server, serving on port `50052` (configurable via `config.ini`)
-*) `shapelet_clf_client.py` which is an example script demonstrating how the main gRPC server can be accessed to classify emails 
+The data used for the spam classification problem consisted of the 419 Nigerian prince dataset (spam), the Enron dataset (ham), and a private dataset of attack emails from the NASA Jet Propulsion Laboratory (JPL). 
+
+## gRPC Dockerized Classifiers for Deployment
+
+The folders **NK_Shapelet_Classifier** and **NK_FCN_LSTM_Classifier** each contain gRPC interfaces with the following components:
+
+1) `grapevine_pb2.py` and `grapevine_pb2_grpc.py` generated from `grapevine.proto` in `protos/` according to instructions in `protos/README.md`. These files must be generated every time `grapevine.proto` is changed
+2) `<classifier_name>_server.py` which is the main gRPC server, serving on port `50050` (configurable via `config.ini`)
+3) `<classifier_name>_client.py` which is an example script demonstrating how the main gRPC server can be accessed to classify individual emails (the methods each build streaming rate functions from sequences of email timestamps)
  
-To build corresponding docker image:
-`sudo docker build -t nk-shapelet-classifier:latest .`
+To build the corresponding docker image:
+`sudo docker build -t <image_name>:latest .`
 
-To run docker image, simply do
-`sudo docker run -it -p 50052:50052 nk-shapelet-classifier:latest`
+To run the docker image, simply do
+`sudo docker run -it -p 50050:50050 <image_name>:latest`
 
-Finally, run the test script as `python3 shapelet_clf_client.py`
+Finally, you can run the test client script as `python3 <classifier_name>_client.py` (contained in each of the individual folders).
 

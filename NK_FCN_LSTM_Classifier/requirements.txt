@@ -1,0 +1,8 @@
+numpy
+sklearn
+pandas
+keras>=2.0.4
+flask
+requests
+grpcio-tools
+git+https://github.com/NewKnowledge/sloth@b9b7b121a1075267dec1eedf5dea94be19de0e4c

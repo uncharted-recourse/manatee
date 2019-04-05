@@ -11,10 +11,6 @@ import configparser
 import grapevine_pb2
 import grapevine_pb2_grpc
 import time
-import json
-import numpy as np
-import pandas as pd
-from manatee.preprocess import parse_weekly_timestamps
 
 def run():
 

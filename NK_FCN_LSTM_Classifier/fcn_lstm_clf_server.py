@@ -1,5 +1,5 @@
 #
-# GRPC Server for NK Shapelet Classifier
+# GRPC Server for NK FCN-LSTM Classifier
 # 
 # Uses GRPC service config in protos/grapevine.proto
 # 
@@ -10,18 +10,21 @@ import time
 import pandas as pd
 import numpy as np
 import configparser
-import tensorflow as tf
 
-from Sloth.classify import Shapelets
+from keras.layers import Conv1D, BatchNormalization, GlobalAveragePooling1D, Permute, Dropout
+from keras.layers import Input, Dense, concatenate, Activation
+from keras.models import Model
+from keras.optimizers import Adam
+from layer_utils import AttentionLSTM
+from sklearn.preprocessing import LabelEncoder
+
 from Sloth.preprocess import events_to_rates
-from tslearn.preprocessing import TimeSeriesScalerMinMax
 
 import grpc
 import logging
 import grapevine_pb2
 import grapevine_pb2_grpc
 from concurrent import futures
-import matplotlib.pyplot as plt
 
 # GLOBALS
 _ONE_DAY_IN_SECONDS = 60 * 60 * 24
@@ -30,19 +33,38 @@ DEBUG = True # boolean to specify whether or not print DEBUG information
 
 restapp = Flask(__name__)
 
+# function that generates attention lstm-fcn model
+def generate_alstmfcn(MAX_SEQUENCE_LENGTH, NB_CLASS, NUM_CELLS=128):
+
+    ip = Input(shape=(1, MAX_SEQUENCE_LENGTH))
+
+    x = AttentionLSTM(NUM_CELLS)(ip)
+    x = Dropout(0.8)(x)
+
+    y = Permute((2, 1))(ip)
+    y = Conv1D(128, 8, padding='same', kernel_initializer='he_uniform')(y)
+    y = BatchNormalization()(y)
+    y = Activation('relu')(y)
+
+    y = Conv1D(256, 5, padding='same', kernel_initializer='he_uniform')(y)
+    y = BatchNormalization()(y)
+    y = Activation('relu')(y)
+
+    y = Conv1D(128, 3, padding='same', kernel_initializer='he_uniform')(y)
+    y = BatchNormalization()(y)
+    y = Activation('relu')(y)
+
+    y = GlobalAveragePooling1D()(y)
+    x = concatenate([x, y])
+    out = Dense(NB_CLASS, activation='softmax')(x)
+    model = Model(ip, out)
+    return model
+
 #-----
-class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
+class NKFCNLSTMClassifier(grapevine_pb2_grpc.ClassifierServicer):
 
     def __init__(self):
         self.series = []
-
-        # set shapelet HPs
-        self.EPOCHS = 100 # dummy, not training here
-        self.LENGTH = 0.05
-        self.NUM_SHAPELET_LENGTHS = 12
-        self.NUM_SHAPELETS = 0.25
-        self.LEARNING_RATE = .01
-        self.WEIGHT_REGULARIZER = .001
 
          # set rate function HPs
         self.SERIES_LENGTH = 240 * 60 # series length in seconds
@@ -50,14 +72,13 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
         self.NUM_BINS = 300
         self.FILTER_BANDWIDTH = 2
 
-        # instantiate shapelet clf and model object using deployed weights
-        self.clf = Shapelets(self.EPOCHS, self.LENGTH, self.NUM_SHAPELET_LENGTHS, self.NUM_SHAPELETS, self.LEARNING_RATE, self.WEIGHT_REGULARIZER)
-        self.model = self.clf.generate_model(int(self.NUM_BINS), len(CATEGORIES.split(',')))
-        print('Load weights...')
+
+        # instantiate FCN-LSTM clf and model object using deployed weights
+        self.model = generate_alstmfcn(int(self.NUM_BINS), len(CATEGORIES.split(',')))
         self.model.load_weights("deployed_checkpoints/" + MODEL_OBJECT)
         self.model._make_predict_function()
-        print('Weights loaded...')
-        self.clf.encode(CATEGORIES.split(','))
+        print("Weights loaded from deployed_checkpoints/" + MODEL_OBJECT)
+        self.le = LabelEncoder().fit(CATEGORIES.split(','))
 
     # Main classify function
     def Classify(self, request, context):
@@ -67,8 +88,8 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
             domain=DOMAIN_OBJECT,
             prediction='false',
             confidence=0.0,
-            model="NK_shapelet_classifer",
-            version="0.0.2",
+            model="NK_FCN_LSTLM_classifier",
+            version="0.0.1",
             meta=grapevine_pb2.Meta(),
         )
 
@@ -79,7 +100,7 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
         if input_time is None:
             return result
 
-        # Shapelet NK_shapelet_classifier prediction code
+        # CNN LSTM classifier prediction code
         start_time = time.time()
         
         # add new timestamp to time series
@@ -99,27 +120,23 @@ class NKShapeletClassifier(grapevine_pb2_grpc.ClassifierServicer):
         # transform series to rate function, scale, and make prediction
         max_time = min(self.series) + self.SERIES_LENGTH
         series_values, _ = events_to_rates(self.series, filter_bandwidth = self.FILTER_BANDWIDTH, max_time = max_time, min_time = min(self.series), num_bins = self.NUM_BINS, density = True)
-        series_values = series_values.reshape((1, len(series_values), 1))
-        series_values = TimeSeriesScalerMinMax().fit_transform(series_values)
+        series_values = series_values.reshape((1, 1, len(series_values)))
 
-        y_probs = self.model.predict(series_values)
-        print(y_probs)
-        pred, confidence = self.clf.decode(y_probs,P_THRESHOLD)
-        print("Classification result is (class / confidence): {} / {}".format(pred, confidence))
+        preds = self.model.predict(series_values)
+        y_probs = [p / np.sum(preds) for p in preds]
+        result.confidence = y_probs[0][0] if y_probs[0][0] > P_THRESHOLD else 1 - y_probs[0][0]
+        result.prediction = self.le.inverse_transform([np.argmax(preds)])[0]
+        print("Classification result is (class / confidence): {} / {}".format(result.prediction, result.confidence))
 
         elapsed_time = time.time()-start_time
         print("Total time for classification is : %.2f sec" % elapsed_time)
-
-        if pred and confidence: # empty edge case
-            result.prediction = pred[0]
-            result.confidence = confidence[0]
 
         return result
 
 #-----
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    grapevine_pb2_grpc.add_ClassifierServicer_to_server(NKShapeletClassifier(), server)
+    grapevine_pb2_grpc.add_ClassifierServicer_to_server(NKFCNLSTMClassifier(), server)
     server.add_insecure_port('[::]:' + GRPC_PORT)
     server.start()
     restapp.run()
